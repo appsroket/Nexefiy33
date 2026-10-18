@@ -1,0 +1,2 @@
+# Keep LF everywhere so migration files stay byte-identical to what was applied.
+* text=auto eol=lf
