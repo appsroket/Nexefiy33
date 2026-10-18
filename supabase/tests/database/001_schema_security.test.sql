@@ -71,7 +71,8 @@ select is_empty(
        and privilege_type in ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER')
        and table_name in ('workflow_runs', 'tasks', 'task_dependencies', 'task_attempts', 'tool_executions',
          'execution_events', 'approval_requests', 'audit_logs', 'subscriptions', 'usage_records',
-         'outcome_records', 'plans', 'plan_entitlements', 'knowledge_chunks', 'workflow_versions') $$,
+         'outcome_records', 'plans', 'plan_entitlements', 'knowledge_chunks', 'workflow_versions',
+         'employee_test_runs') $$,
   'execution, approval, audit, and billing tables are read-only for clients'
 );
 
@@ -98,8 +99,9 @@ select is_empty(
 select is(
   (select array_agg(p.proname::text order by p.proname::text) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
-  array['accept_invitation', 'create_invitation', 'create_organization', 'decide_approval', 'get_invitation', 'match_knowledge_chunks',
-    'reprocess_knowledge_source', 'search_knowledge'],
+  array['accept_invitation', 'change_employee_status', 'create_employee', 'create_invitation', 'create_organization',
+    'decide_approval', 'employee_test_summary', 'get_invitation', 'match_knowledge_chunks', 'reprocess_knowledge_source',
+    'review_employee_test_run', 'save_employee_version', 'search_knowledge'],
   'authenticated can call exactly the intended RPCs'
 );
 

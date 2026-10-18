@@ -44,7 +44,8 @@ begin
     insert into public.employee_versions (id, organization_id, employee_id, instructions, config)
       values ((p || '2' || id_of || '2')::uuid, org, (p || '2' || id_of || '1')::uuid, 'Answer support questions.',
         '{"modelTier": "balanced", "limits": {"maxTurnsPerTask": 10, "maxToolCallsPerTask": 10, "maxCostUsdPerTask": 1}}');
-    update public.ai_employees set current_version_id = (p || '2' || id_of || '2')::uuid, status = 'active'
+    update public.ai_employees set current_version_id = (p || '2' || id_of || '2')::uuid, status = 'active',
+      active_version_id = (p || '2' || id_of || '2')::uuid, activated_at = now()
       where id = (p || '2' || id_of || '1')::uuid;
     insert into public.skills (id, organization_id, key, name, category)
       values ((p || 'b' || id_of || '1')::uuid, org, 'custom.followup', 'Follow-up', 'custom');

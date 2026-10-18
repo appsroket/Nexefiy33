@@ -104,6 +104,8 @@ Steps:
 
 Only the selected provider's key is required; setting the other one produces a warning that it's unused.
 
+**Used by:** AI employee drafting (Claude Opus 5.5) and every test-playground run (the employee's tier: Claude Haiku 5.5, Sonnet 5.5 or Opus 5.5), Phase 9. Without the key, drafting falls back to labelled keyword rules and the playground refuses to run (nothing is simulated). Test runs are billed to this key; each employee's monthly budget caps its own runs, and the console spend limit caps everything.
+
 **Connectivity check:** lists one model via the Models API (`GET /v1/models`) — free and read-only.
 **Rotation:** create a new key → deploy it → confirm with the connectivity check → disable the old key in the console.
 

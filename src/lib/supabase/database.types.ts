@@ -19,19 +19,28 @@ export type Database = {
     Tables: {
       ai_employees: {
         Row: {
+          activated_at: string | null
+          activated_by: string | null
+          active_version_id: string | null
           avatar_url: string | null
           created_at: string
           created_by: string | null
           current_version_id: string | null
           description: string | null
           id: string
+          lifecycle_status: string
           name: string
           organization_id: string
           role_category: string
           status: string
+          template_key: string | null
+          testing_started_at: string | null
           updated_at: string
         }
         Insert: {
+          activated_at?: string | null
+          activated_by?: string | null
+          active_version_id?: string | null
           avatar_url?: string | null
           created_at?: string
           created_by?: string | null
@@ -42,9 +51,14 @@ export type Database = {
           organization_id: string
           role_category: string
           status?: string
+          template_key?: string | null
+          testing_started_at?: string | null
           updated_at?: string
         }
         Update: {
+          activated_at?: string | null
+          activated_by?: string | null
+          active_version_id?: string | null
           avatar_url?: string | null
           created_at?: string
           created_by?: string | null
@@ -55,9 +69,18 @@ export type Database = {
           organization_id?: string
           role_category?: string
           status?: string
+          template_key?: string | null
+          testing_started_at?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_employees_active_version_fk"
+            columns: ["active_version_id", "id"]
+            isOneToOne: false
+            referencedRelation: "employee_versions"
+            referencedColumns: ["id", "employee_id"]
+          },
           {
             foreignKeyName: "ai_employees_current_version_fk"
             columns: ["current_version_id", "id"]
@@ -386,6 +409,150 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "skills"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_test_cases: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          employee_id: string
+          expectations: Json
+          id: string
+          input: string
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          employee_id: string
+          expectations?: Json
+          id?: string
+          input: string
+          name: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          employee_id?: string
+          expectations?: Json
+          id?: string
+          input?: string
+          name?: string
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_test_cases_employee_id_organization_id_fkey"
+            columns: ["employee_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "ai_employees"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      employee_test_runs: {
+        Row: {
+          checks: Json
+          cost_micros: number
+          created_at: string
+          created_by: string | null
+          employee_id: string
+          error: Json | null
+          finished_at: string | null
+          id: string
+          input: string
+          input_tokens: number
+          model: string | null
+          organization_id: string
+          outcome: string | null
+          output_tokens: number
+          reply: string | null
+          result: string
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          started_at: string
+          test_case_id: string | null
+          transcript: Json
+          version_id: string
+        }
+        Insert: {
+          checks?: Json
+          cost_micros?: number
+          created_at?: string
+          created_by?: string | null
+          employee_id: string
+          error?: Json | null
+          finished_at?: string | null
+          id?: string
+          input: string
+          input_tokens?: number
+          model?: string | null
+          organization_id: string
+          outcome?: string | null
+          output_tokens?: number
+          reply?: string | null
+          result?: string
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          started_at?: string
+          test_case_id?: string | null
+          transcript?: Json
+          version_id: string
+        }
+        Update: {
+          checks?: Json
+          cost_micros?: number
+          created_at?: string
+          created_by?: string | null
+          employee_id?: string
+          error?: Json | null
+          finished_at?: string | null
+          id?: string
+          input?: string
+          input_tokens?: number
+          model?: string | null
+          organization_id?: string
+          outcome?: string | null
+          output_tokens?: number
+          reply?: string | null
+          result?: string
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          started_at?: string
+          test_case_id?: string | null
+          transcript?: Json
+          version_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_test_runs_employee_id_organization_id_fkey"
+            columns: ["employee_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "ai_employees"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "employee_test_runs_test_case_id_employee_id_fkey"
+            columns: ["test_case_id", "employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_test_cases"
+            referencedColumns: ["id", "employee_id"]
+          },
+          {
+            foreignKeyName: "employee_test_runs_version_id_employee_id_fkey"
+            columns: ["version_id", "employee_id"]
+            isOneToOne: false
+            referencedRelation: "employee_versions"
+            referencedColumns: ["id", "employee_id"]
           },
         ]
       }
@@ -2194,6 +2361,15 @@ export type Database = {
     }
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string }
+      change_employee_status: {
+        Args: {
+          p_action: string
+          p_confirm_name?: string
+          p_employee_id: string
+          p_version_id?: string
+        }
+        Returns: Json
+      }
       claim_knowledge_sources: {
         Args: {
           p_lease_seconds?: number
@@ -2228,6 +2404,15 @@ export type Database = {
           allowed: boolean
           retry_after_ms: number
         }[]
+      }
+      create_employee: {
+        Args: {
+          p_change_note?: string
+          p_config: Json
+          p_instructions: string
+          p_organization_id: string
+        }
+        Returns: string
       }
       create_invitation: {
         Args: {
@@ -2296,6 +2481,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      employee_test_summary: {
+        Args: { p_employee_id: string }
+        Returns: {
+          failed_runs: number
+          last_run_at: string | null
+          passed_runs: number
+          test_status: string
+          version_id: string
+        }[]
+      }
       get_invitation: {
         Args: { p_token: string }
         Returns: {
@@ -2330,6 +2525,20 @@ export type Database = {
       reprocess_knowledge_source: {
         Args: { p_source_id: string }
         Returns: string
+      }
+      review_employee_test_run: {
+        Args: { p_note?: string; p_run_id: string; p_verdict: string }
+        Returns: string
+      }
+      save_employee_version: {
+        Args: {
+          p_based_on_version_id: string
+          p_change_note?: string
+          p_config: Json
+          p_employee_id: string
+          p_instructions: string
+        }
+        Returns: Json
       }
       search_knowledge: {
         Args: {

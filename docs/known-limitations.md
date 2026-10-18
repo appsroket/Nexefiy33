@@ -2,6 +2,25 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 9 (2026-10-18)
+
+### Implemented and verified
+- **Application:** employee creation from a description (model drafting, or keyword rules when no model is configured) or a template; the editor with every configuration field; immutable versions and history; lifecycle controls (start testing, activate with typed confirmation, pause, resume, archive, restore, delete never-activated drafts); the test playground (free-form runs, test cases with automatic checks, reviewer verdicts, transcripts with every tool call and its decision); the shared runtime and its limits; the Anthropic gateway; templates limited to real tools. Vitest: 55 new tests (529 total) — domain rules, runtime limits, the test invoker, the Anthropic adapter (contract test with a fake SDK client, written from the Claude API reference), test runs against an in-memory database, and the Server Actions. `tsc`, ESLint, `next build` (with placeholder public variables) and the bundle secret scan pass.
+
+### Not verified yet
+- **Migration `employee_builder` is not applied** to the development project: the Supabase connector asked for the owner's confirmation (the migration updates the built-in skills and its functions delete and re-create grants) and the prompt was cancelled, twice — once for a rolled-back dry run with pgTAP, once for the migration itself. Until it is applied, the employee pages fail against the dev database (new columns, tables and functions are missing). **pgTAP `008_employee_builder` (and the updated 001 RPC list and shared fixture) have not run.** The file is named `20261018190000`; rename it to the recorded version after applying.
+- **No model call has been made from this code.** No `ANTHROPIC_API_KEY` is configured anywhere, so model drafting and every playground run are untested against the real API (the playground refuses to run without a key; nothing is simulated). The request shape follows the Claude API reference checked on 2026-10-18.
+- No signed-in browser check of the employee pages (no real account has signed in yet; see Phase 6).
+- Prices in `src/modules/models/domain/catalog.ts` come from Anthropic's model pages and the Claude API reference (cached 2026-10-06); confirm them on the pricing page before relying on budgets.
+
+### Limitations
+- **No real work yet:** an active employee can't be given tasks, chat or workflow steps; activation records exactly what it may do (version, tools, approvals) for when it can.
+- **Test runs:** run synchronously inside the request (bounded by the employee's time limit and the platform's function limit, 300 s on the playground page); writes are never carried out, so a test proves the decision, not the provider's response to a write.
+- **Escalation** stops the run and records why; nobody is notified.
+- **Costs** are input + output tokens at list price; prompt caching and batch discounts aren't used. Server-side refusal fallbacks aren't enabled: a refusal ends the run.
+- **Drafting by keyword rules** is crude by design (labelled as such); it never adds a tool that doesn't exist.
+- Plan limits (`employees.max`) aren't enforced; billing isn't built.
+
 ## As of Phase 8 (2026-10-18)
 
 ### Implemented and verified

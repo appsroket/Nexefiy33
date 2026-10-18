@@ -70,6 +70,14 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - **No duplicate side effects:** idempotency keys per request; non-idempotent actions are never resent once they may have reached the provider (`outcome_unknown` instead).
 - **Untrusted output:** provider error text is redacted and length-capped before it is stored or shown; Slack text is escaped so content can't trigger mentions or disguised links; HubSpot note bodies are HTML-escaped.
 
+### 5.4 AI employees (implemented in Phase 9, ADR-024)
+- **Model output is never authorization.** An employee can call only the tools its version grants (others are refused, never executed); every call is validated against the tool's schema and, for integration tools, previewed with the executor's own checks (organization-scoped connection, scopes, action setting, workspace policies). The employee's own approval rule can only add approval.
+- **Platform rules first.** The system prompt starts with rules the configuration can't override; tool results and knowledge passages are framed as data, not instructions.
+- **Tests never change anything outside Nexefiy:** writes are described, not run; reads that would run without approval go through `requestAction` with the tester as the actor and are recorded.
+- **Activation is gated:** only admins activate, only the latest version, only after its tests pass, with the employee's name typed to confirm; activation replaces the employee's grants with exactly the version's and is audited. Any operator can pause an active employee.
+- **Spending is capped** per task (cost, steps, tool calls, seconds) and per month (budget, counted from recorded usage); the runtime stops before the next step could cross a limit.
+- Status, version pointers and test results can't be written by clients (column grants; `change_employee_status`, `review_employee_test_run`); test runs are written by the server after a role check, scoped to the verified organization.
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).

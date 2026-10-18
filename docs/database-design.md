@@ -68,9 +68,11 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 ### AI workforce
 | Table | Purpose | Notes |
 |---|---|---|
-| `skills` | Skill catalog | `organization_id NULL` = built-in (5 seeded); org skills unique per key |
-| `ai_employees` | Employees | Category, status; `current_version_id` → own versions only; cannot be active without a version |
-| `employee_versions` | Immutable configuration + instructions | Version number assigned by trigger; `config` validated against **employee config schema v1**; no secrets in config or instructions; updates rejected |
+| `skills` | Skill catalog | `organization_id NULL` = built-in (5 seeded; since `employee_builder` the Gmail and Calendar skills are `deprecated` and the CRM/chat skills list the real HubSpot/Slack action keys); org skills unique per key |
+| `ai_employees` | Employees | Department (`role_category`), `status`; `lifecycle_status` (generated: draft, testing, active, paused, archived — "testing" is a draft with `testing_started_at`); `current_version_id` = latest saved version, `active_version_id` = the version an admin activated (what runs); `activated_at/by`; `template_key`. Clients can't write status or version pointers (only `change_employee_status` can); the profile is copied from each saved v2 version; only never-activated drafts can be deleted |
+| `employee_versions` | Immutable configuration + instructions | Version number assigned by trigger; `config` validated against **employee config schema v1 or v2**; no secrets in config or instructions; updates rejected; inserting one makes it current (`private.apply_employee_version`); archived employees can't get new versions |
+| `employee_test_cases` | Saved playground requests with expectations (tools used / not used / waiting for approval, reply mentions, escalation) | Operators manage; expectations JSON schema-checked; unique name per employee |
+| `employee_test_runs` | Every playground run: version, input, result (`running`/`passed`/`failed`/`needs_review`/`error`), outcome, reply, transcript, checks, model, tokens, cost, reviewer verdict | Written by the server only; members read; verdicts through `review_employee_test_run` |
 | `employee_skills` | Employee ↔ skill (M:N) | Skill must be built-in or same organization |
 | `employee_tool_permissions` | Per-employee tool ceiling (`allow`/`require_approval`/`deny`) | Optionally bound to an integration of the same org; admin-only |
 
@@ -121,7 +123,7 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 
 | Validator | Used by | Versions |
 |---|---|---|
-| `private.employee_config_is_valid(version, config)` | `employee_versions.config` | v1: `modelTier`, optional `model`, `channels`, required `limits` (turns, tool calls, cost), `outputStyle`, `knowledge` |
+| `private.employee_config_is_valid(version, config)` | `employee_versions.config` | v1: `modelTier`, optional `model`, `channels`, required `limits` (turns, tool calls, cost), `outputStyle`, `knowledge`. v2 (Phase 9, written by the builder): `profile`, `responsibilities`, `skills`, `tools` (key, connection, approval), `knowledge` (access, sources, passages), `model` (provider, tier, effort, max output tokens), `successCriteria`, `allowedActions`, `prohibitedActions`, `escalation`, `limits` (turns, tool calls, cost, runtime), `budget`; plus unique tools and non-empty selected sources |
 | `private.workflow_graph_is_valid(version, graph)` | `workflow_versions.graph` | v1: `nodes` (`employee_task`, `tool_action`, `condition`, `approval`, `delay`), `edges`, `settings` + structural checks |
 | `private.policy_document_is_valid(version, policy)` | `organization_policies.policy` | v1: `rules[]` with `effect`, `toolKeys`, `riskLevels`, `employeeIds`, `conditions`; `defaults` |
 | `private.company_settings_is_valid(settings)` | `company_settings.settings` | v1 (`schemaVersion` 1 or absent): `profile`, `operatingHours.weekly` (up to 3 `open`/`close` ranges per weekday, 24-hour times), `brandVoice` |
@@ -131,7 +133,7 @@ To evolve a format: add a new branch (`when 2 then …`) in a new migration with
 
 ## 6. Row Level Security
 
-- RLS is enabled on all 34 tables; every client-visible table has explicit per-command policies (`to authenticated`), and `anon` has no table privileges except the plan catalog.
+- RLS is enabled on every table (36 applied; 38 once `employee_builder` is applied); every client-visible table has explicit per-command policies (`to authenticated`), and `anon` has no table privileges except the plan catalog.
 - Policies use `organization_id in (select private.member_org_ids())` or `private.org_ids_with_min_role('<role>')` — evaluated once per statement, derived only from `auth.uid()`; a client-supplied organization id is never trusted.
 - Privileges are granted explicitly per table and per column after revoking Supabase defaults, so even a mistaken policy cannot let clients write columns such as `status`, `created_by`, or `organization_id` on update.
 
@@ -147,9 +149,12 @@ To evolve a format: add a new branch (`when 2 then …`) in a new migration with
 | `public.create_organization`, `create_invitation`, `accept_invitation`, `decide_approval` | Write rows clients cannot write directly | Derive the user from `auth.uid()`, check membership/role inside, `authenticated` only, generic errors for unknown ids/tokens |
 | `public.reprocess_knowledge_source` | Change `status` and processing columns clients cannot write | Only `ready`/`failed` sources in organizations where the caller is operator or above; generic error otherwise; `authenticated` only |
 | `private.sync_business_context_source` | Trigger: keep one knowledge source per indexed context item | Writes only the source of the changed item, in the item's organization; skips escalation contacts |
+| `public.change_employee_status` | Move status and version pointers, sync grants on activation, write the activation audit event | Role per action (operator: start testing, back to draft, pause; admin: activate, resume, archive, restore) checked with `private.has_min_role` on the employee's own organization; activation needs the latest version, its tests passed (`private.employee_version_test_status`) and the typed name; generic P0002 for unknown ids or too-low roles |
+| `public.review_employee_test_run` | Clients can't write test runs | Operator of the run's organization; only `needs_review` → passed/failed or passed → failed |
+| `private.apply_employee_version` | Trigger: make a new version current and copy its profile (clients can't update those columns) | Updates only the inserted version's own employee in its organization; refuses archived employees |
 | `public.get_invitation` | Lets an invitee see an invitation before joining (they can't read invitation rows) | Only by token (32 random bytes; malformed tokens return nothing); returns the workspace name, role, status, invited address and whether it matches the caller's confirmed email; `authenticated` only |
 
-Phase 8's `consume_integration_rate_limit` and `claim_tool_executions` are SECURITY INVOKER and executable only by `service_role`.
+Phase 8's `consume_integration_rate_limit` and `claim_tool_executions` are SECURITY INVOKER and executable only by `service_role`. Phase 9's `create_employee`, `save_employee_version` and `employee_test_summary` are SECURITY INVOKER (RLS applies).
 
 The Supabase security advisor reports these RPCs (WARN, *authenticated can execute SECURITY DEFINER*; five while `knowledge_pipeline` is unapplied) and four tables with RLS but no policies (INFO, `integration_secrets`, `integration_oauth_states`, `integration_rate_limit_windows`, `provider_webhook_events`). Both are intentional and covered by tests.
 
@@ -172,6 +177,7 @@ The Supabase security advisor reports these RPCs (WARN, *authenticated can execu
 | 20261018102320 | invitation_lookup | `get_invitation()`; `create_invitation()` expires a lapsed invitation before re-inviting and reports a live one |
 | 20261018145032 | business_context | `company_settings` JSON schema, `business_context_items` (Phase 7) |
 | 20261018154440 | integration_framework | OAuth states, refresh lease, rate-limit windows + `consume_integration_rate_limit`, connection health, tool-execution pending input/attempts/lease + `claim_tool_executions`, pending-input column grants (Phase 8) |
+| (pending) | employee_builder | employee lifecycle (`testing_started_at`, `active_version_id`, generated `lifecycle_status`), config schema v2, `employee_test_cases`, `employee_test_runs`, `create_employee`, `save_employee_version`, `change_employee_status`, `review_employee_test_run`, `employee_test_summary`, column grants, delete only unactivated drafts, skills catalog limited to real tools (Phase 9; written as `20261018190000`, rename to the recorded version when applied) |
 | (pending) | knowledge_pipeline | `knowledge` bucket + storage policies, source processing columns, business context sources + sync trigger, chunk `search_vector`, `search_knowledge`, `claim_knowledge_sources`, `reprocess_knowledge_source` (Phase 7) |
 
 ## 8. Known gaps (by design, revisit later)

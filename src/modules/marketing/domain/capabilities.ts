@@ -68,9 +68,9 @@ export const CAPABILITIES: Record<CapabilityArea, readonly Capability[]> = {
   configure: [
     {
       id: 'employee-templates',
-      title: 'AI employees from templates',
+      title: 'AI employees from a description or a template',
       description:
-        'Start from a Customer Support, Sales Development or Executive Assistant template, or a blank employee, and adjust its instructions.',
+        'Describe the employee in your own words or start from a template, review every setting, test it, then activate it once its tests pass.',
       status: 'first_release',
     },
     {

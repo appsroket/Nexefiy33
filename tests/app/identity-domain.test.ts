@@ -254,6 +254,16 @@ describe('browser bundle hygiene', () => {
     'src/modules/integrations/domain/retry.ts',
     'src/modules/integrations/domain/types.ts',
     'src/modules/integrations/ui/labels.ts',
+    'src/modules/employees/domain/defaults.ts',
+    'src/modules/employees/domain/lifecycle.ts',
+    'src/modules/employees/domain/prompt.ts',
+    'src/modules/employees/domain/rule-drafter.ts',
+    'src/modules/employees/domain/templates.ts',
+    'src/modules/employees/domain/test-checks.ts',
+    'src/modules/employees/domain/types.ts',
+    'src/modules/employees/domain/validation.ts',
+    'src/modules/employees/ui/labels.ts',
+    'src/modules/models/domain/catalog.ts',
   ]
 
   it('keeps Zod out of modules that client components import', () => {

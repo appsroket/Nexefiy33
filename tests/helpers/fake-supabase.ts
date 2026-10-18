@@ -1,6 +1,6 @@
 // A small in-memory stand-in for the Supabase client: enough of the
 // PostgREST query builder (select/insert/upsert/update/delete with
-// eq/neq/in/is/gt/lt/or filters), rpc and storage for server code under test. It records every
+// eq/neq/in/is/gt/gte/lt/or filters), rpc and storage for server code under test. It records every
 // table query with its filters so tests can assert that each one was scoped
 // to an organization. It does not implement RLS — that is tested in pgTAP.
 
@@ -125,6 +125,10 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     this.filters.push([column, 'gt', value])
     return this
   }
+  gte(column: string, value: unknown) {
+    this.filters.push([column, 'gte', value])
+    return this
+  }
   lt(column: string, value: unknown) {
     this.filters.push([column, 'lt', value])
     return this
@@ -162,6 +166,8 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
         return cell === null || cell === undefined
       case 'gt':
         return cell !== null && cell !== undefined && String(cell) > String(value)
+      case 'gte':
+        return cell !== null && cell !== undefined && String(cell) >= String(value)
       case 'lt':
         return cell !== null && cell !== undefined && String(cell) < String(value)
       case 'or':

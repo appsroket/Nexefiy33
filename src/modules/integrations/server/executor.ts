@@ -167,6 +167,45 @@ async function decide(runtime: IntegrationRuntime, organizationId: string, integ
   return { ...decision, approvalHours }
 }
 
+export type DecisionPreview =
+  | { status: 'ok'; decision: 'allow' | 'require_approval' | 'deny'; reason: string }
+  | { status: 'refused'; error: NormalizedError }
+
+/**
+ * The decision an action would get on this connection now (connection,
+ * scopes, setting and policies), without recording or running anything.
+ * Used by the employee test playground; running still goes through
+ * requestAction, which repeats every check.
+ */
+export async function previewActionDecision(
+  runtime: IntegrationRuntime,
+  request: { organizationId: string; integrationId: string; actionKey: string; employeeId?: string },
+): Promise<DecisionPreview> {
+  const found = findAction(request.actionKey)
+  if (!found) return { status: 'refused', error: new IntegrationError('invalid_input', { message: 'Unknown action.' }).toJSON() }
+  const { connector, action } = found
+  try {
+    const connection = await loadConnection(runtime, request.organizationId, request.integrationId)
+    const problem = checkConnection(connection, connector, action)
+    if (problem) return { status: 'refused', error: problem.toJSON() }
+    const [setting, { policies }] = await Promise.all([
+      loadSetting(runtime, request.organizationId, request.integrationId, action.key),
+      loadPolicies(runtime, request.organizationId),
+    ])
+    const decision = decideAction({
+      requirement: action.approval,
+      risk: action.risk,
+      connectionMode: setting.approvalMode,
+      enabled: setting.enabled,
+      policy: evaluatePolicies(policies, { toolKey: action.key, risk: action.risk, ...(request.employeeId ? { employeeId: request.employeeId } : {}) }),
+    })
+    return { status: 'ok', decision: decision.decision, reason: decision.reason }
+  } catch (error) {
+    if (isIntegrationError(error)) return { status: 'refused', error: error.toJSON() }
+    throw error
+  }
+}
+
 export async function requestAction(runtime: IntegrationRuntime, request: ExecuteRequest): Promise<ExecuteResult> {
   const found = findAction(request.actionKey)
   if (!found) return refused(new IntegrationError('invalid_input', { message: 'Unknown action.' }))

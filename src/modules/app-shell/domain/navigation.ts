@@ -53,8 +53,8 @@ export const NAVIGATION: readonly NavSection[] = [
         title: 'AI employees',
         href: '/app/employees',
         icon: 'employees',
-        description: 'Create AI employees, give them instructions and tools, and supervise their work.',
-        availability: 'planned',
+        description: 'Create AI employees, give them instructions and tools, test them, and decide when they go live.',
+        availability: 'available',
         keywords: ['agents', 'staff', 'team', 'assistants'],
       },
       {
