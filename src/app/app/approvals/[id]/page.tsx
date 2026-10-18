@@ -15,6 +15,8 @@ import { getApprovalRequest } from '@/modules/governance/server/approvals'
 import { ApprovalDecision } from '@/modules/governance/ui/approval-decision'
 
 export const metadata: Metadata = { title: 'Approval request' }
+// An approval decision runs the action and the waiting task after the response, in this route's function.
+export const maxDuration = 300
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

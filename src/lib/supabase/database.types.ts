@@ -1676,46 +1676,67 @@ export type Database = {
       }
       task_attempts: {
         Row: {
+          active_ms: number
           attempt_number: number
+          checkpoint: Json | null
+          checkpoint_at: string | null
+          cost_micros: number
           created_at: string
           engine_attempt_id: string | null
           error: Json | null
           finished_at: string | null
           id: string
+          model: string | null
           model_input_tokens: number
           model_output_tokens: number
           organization_id: string
           started_at: string
           status: string
           task_id: string
+          tool_call_count: number
+          turn_count: number
         }
         Insert: {
+          active_ms?: number
           attempt_number: number
+          checkpoint?: Json | null
+          checkpoint_at?: string | null
+          cost_micros?: number
           created_at?: string
           engine_attempt_id?: string | null
           error?: Json | null
           finished_at?: string | null
           id?: string
+          model?: string | null
           model_input_tokens?: number
           model_output_tokens?: number
           organization_id: string
           started_at?: string
           status?: string
           task_id: string
+          tool_call_count?: number
+          turn_count?: number
         }
         Update: {
+          active_ms?: number
           attempt_number?: number
+          checkpoint?: Json | null
+          checkpoint_at?: string | null
+          cost_micros?: number
           created_at?: string
           engine_attempt_id?: string | null
           error?: Json | null
           finished_at?: string | null
           id?: string
+          model?: string | null
           model_input_tokens?: number
           model_output_tokens?: number
           organization_id?: string
           started_at?: string
           status?: string
           task_id?: string
+          tool_call_count?: number
+          turn_count?: number
         }
         Relationships: [
           {
@@ -1766,9 +1787,86 @@ export type Database = {
           },
         ]
       }
+      task_evidence: {
+        Row: {
+          created_at: string
+          data: Json
+          excerpt: string | null
+          id: string
+          kind: string
+          knowledge_chunk_id: string | null
+          knowledge_source_id: string | null
+          label: string | null
+          organization_id: string
+          suspected_instructions: boolean
+          task_attempt_id: string | null
+          task_id: string
+          title: string
+          tool_execution_id: string | null
+          tool_key: string | null
+        }
+        Insert: {
+          created_at?: string
+          data?: Json
+          excerpt?: string | null
+          id?: string
+          kind: string
+          knowledge_chunk_id?: string | null
+          knowledge_source_id?: string | null
+          label?: string | null
+          organization_id: string
+          suspected_instructions?: boolean
+          task_attempt_id?: string | null
+          task_id: string
+          title: string
+          tool_execution_id?: string | null
+          tool_key?: string | null
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          excerpt?: string | null
+          id?: string
+          kind?: string
+          knowledge_chunk_id?: string | null
+          knowledge_source_id?: string | null
+          label?: string | null
+          organization_id?: string
+          suspected_instructions?: boolean
+          task_attempt_id?: string | null
+          task_id?: string
+          title?: string
+          tool_execution_id?: string | null
+          tool_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_evidence_task_id_organization_id_fkey"
+            columns: ["task_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "task_evidence_tool_execution_id_organization_id_fkey"
+            columns: ["tool_execution_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "tool_executions"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "task_evidence_knowledge_source_id_organization_id_fkey"
+            columns: ["knowledge_source_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_sources"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           attempt_count: number
+          cancel_requested_at: string | null
           completed_at: string | null
           created_at: string
           created_by: string | null
@@ -1779,6 +1877,7 @@ export type Database = {
           idempotency_key: string
           input: Json
           instructions: string | null
+          lease_expires_at: string | null
           max_attempts: number
           node_id: string | null
           organization_id: string
@@ -1795,6 +1894,7 @@ export type Database = {
         }
         Insert: {
           attempt_count?: number
+          cancel_requested_at?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -1805,6 +1905,7 @@ export type Database = {
           idempotency_key: string
           input?: Json
           instructions?: string | null
+          lease_expires_at?: string | null
           max_attempts?: number
           node_id?: string | null
           organization_id: string
@@ -1821,6 +1922,7 @@ export type Database = {
         }
         Update: {
           attempt_count?: number
+          cancel_requested_at?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -1831,6 +1933,7 @@ export type Database = {
           idempotency_key?: string
           input?: Json
           instructions?: string | null
+          lease_expires_at?: string | null
           max_attempts?: number
           node_id?: string | null
           organization_id?: string
@@ -2383,6 +2486,27 @@ export type Database = {
           source_id: string
         }[]
       }
+      assign_employee_task: {
+        Args: {
+          p_employee_id: string
+          p_idempotency_key: string
+          p_instructions: string
+          p_title: string
+        }
+        Returns: string
+      }
+      cancel_employee_task: { Args: { p_task_id: string }; Returns: string }
+      claim_employee_tasks: {
+        Args: { p_lease_seconds?: number; p_limit?: number }
+        Returns: {
+          attempt_id: string
+          attempt_number: number
+          new_attempt: boolean
+          organization_id: string
+          recovered: boolean
+          task_id: string
+        }[]
+      }
       claim_tool_executions: {
         Args: { p_lease_seconds?: number; p_limit?: number }
         Returns: {
@@ -2391,6 +2515,11 @@ export type Database = {
           recovered: boolean
           tool_execution_id: string
         }[]
+      }
+      expire_overdue_approvals: { Args: { p_limit?: number }; Returns: number }
+      reply_to_employee_task: {
+        Args: { p_message: string; p_task_id: string }
+        Returns: string
       }
       consume_integration_rate_limit: {
         Args: {

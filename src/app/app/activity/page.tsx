@@ -1,9 +1,6 @@
-import type { Metadata } from 'next'
+import { redirect } from 'next/navigation'
 
-import { PlannedSection } from '@/modules/app-shell/ui/planned-section'
-
-export const metadata: Metadata = { title: 'Activity' }
-
+// Activity became the task list.
 export default function Page() {
-  return <PlannedSection href="/app/activity" />
+  redirect('/app/tasks')
 }

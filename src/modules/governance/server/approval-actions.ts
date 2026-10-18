@@ -5,7 +5,8 @@
 // expiry, and that the payload fingerprint is the one the approver saw (a
 // changed action can't be approved by an old screen). An approved action is
 // then run by the integration executor, which re-checks the connection,
-// permissions and payload before calling the provider.
+// permissions and payload before calling the provider; an employee's task
+// waiting on the decision then continues.
 
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
@@ -14,7 +15,8 @@ import { actionError, actionSuccess, type ActionState } from '@/lib/forms/action
 import { redact } from '@/lib/logging/redact'
 import { createUserClient } from '@/lib/supabase/server'
 import { getVerifiedUser, SESSION_ENDED_MESSAGE } from '@/modules/identity/server/session'
-import { closeRejectedTask, scheduleApprovedExecutions } from '@/modules/integrations/server/scheduling'
+import { closeRejectedTask } from '@/modules/integrations/server/scheduling'
+import { scheduleTaskProcessing } from '@/modules/tasks/server/scheduling'
 
 const decisionSchema = z.object({
   requestId: z.uuid(),
@@ -59,10 +61,17 @@ export async function decideApproval(_previous: ActionState, formData: FormData)
 
   if (data.status === 'expired') return actionError('This request expired before it was decided; the action was cancelled.')
   if (data.status === 'approved') {
-    scheduleApprovedExecutions()
-    return actionSuccess('Approved. The action will run in a moment; its result appears on the integration page.')
+    // Runs the action, then the employee task waiting on it (if any).
+    scheduleTaskProcessing({ approvedActions: true })
+    return actionSuccess(
+      data.employee_id
+        ? 'Approved. The action will run in a moment, then the employee continues its task.'
+        : 'Approved. The action will run in a moment; its result appears on the integration page.',
+    )
   }
 
+  // A person's own action task is closed; an employee's task continues and is told.
   await closeRejectedTask(data.organization_id, data.task_id)
+  scheduleTaskProcessing()
   return actionSuccess('Rejected. The action will not run.')
 }

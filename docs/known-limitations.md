@@ -2,6 +2,23 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 10 (2026-10-18)
+
+### Implemented and verified
+- **Application:** assigning bounded tasks to active employees; the task queue (claim with leases, recovery from the last checkpoint, bounded retries with failure classes); the shared runtime with checkpoints, pausing for approvals and replies, `finish_task` reports, model-call retries, cancellation; the live invoker and the executor's employee actor (grant, active employee, own running task, approval floors, idempotency per model call); untrusted-result framing and the suspicious-content approval rule; verification against the executor's records; trace, evidence and per-step usage; task list and detail pages (actions with receipts, evidence, trace, attempts, cost), reply and cancel; `/api/cron/tasks` (expires approvals, runs approved actions and tasks). Vitest: 38 new tests (567 total) — task domain rules, runtime checkpoints/resume/injection/cancellation, the executor with an employee actor, the live invoker, the task runner end to end in memory (scripted model, real executor, fake HubSpot), and the Server Actions. `tsc`, ESLint, `next build` and the bundle scan pass.
+
+### Not verified yet
+- **The phase's stop condition — an AI employee completing a bounded task with a real authorized tool — has not been observed live.** It is exercised end to end only in memory: a scripted model, the real runtime, live invoker and executor, and a fake HubSpot that answers like the documented API. Three things are missing for a live run: (1) migrations `knowledge_pipeline`, `employee_builder` and `task_runtime` applied to the dev project (owner confirmation in the Supabase connector; the earlier prompts were cancelled, so they were not retried); (2) `ANTHROPIC_API_KEY` set on the deployment; (3) a connected HubSpot (or Slack) account, which needs the app credentials — or an employee with only knowledge search, which needs (1) and (2) plus an uploaded document.
+- **pgTAP `009_task_runtime` has not run** (nor 006 and 008), and the updated 001 lists haven't run.
+- No signed-in browser check of the task pages.
+
+### Limitations
+- **No durable engine and no cron schedule:** tasks run after the response that queued them (the assigning, approving or replying request, bounded by its 300 s function limit) or when `/api/cron/tasks` is called; `vercel.json` does not exist. A step cut off by the platform is recovered from its checkpoint as a new attempt (after the 330 s lease).
+- **Escalation** waits on the task page; nobody is notified.
+- **Verification** of claims is a wording heuristic plus receipts; it can't judge whether the work met the success criteria (that stays with the reviewer).
+- Workflows and chat don't exist; tasks are assigned by hand.
+- Costs exclude prompt caching (not used).
+
 ## As of Phase 9 (2026-10-18)
 
 ### Implemented and verified

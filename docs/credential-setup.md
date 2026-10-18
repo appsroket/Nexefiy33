@@ -104,7 +104,7 @@ Steps:
 
 Only the selected provider's key is required; setting the other one produces a warning that it's unused.
 
-**Used by:** AI employee drafting (Claude Opus 5.5) and every test-playground run (the employee's tier: Claude Haiku 5.5, Sonnet 5.5 or Opus 5.5), Phase 9. Without the key, drafting falls back to labelled keyword rules and the playground refuses to run (nothing is simulated). Test runs are billed to this key; each employee's monthly budget caps its own runs, and the console spend limit caps everything.
+**Used by:** AI employee drafting (Claude Opus 5.5), every test-playground run (Phase 9) and every employee task (Phase 10), at the employee's tier: Claude Haiku 5.5, Sonnet 5.5 or Opus 5.5. Without the key, drafting falls back to labelled keyword rules, the playground refuses to run, and assigned tasks stay queued (nothing is simulated). Test runs and tasks are billed to this key; each employee's per-task limit and monthly budget cap its own spend, and the console spend limit caps everything. Tasks also need `SUPABASE_SECRET_KEY`; tasks that use HubSpot or Slack need the credential encryption keys and a connected account. `/api/cron/tasks` (with `CRON_SECRET`) expires overdue approvals and runs queued tasks.
 
 **Connectivity check:** lists one model via the Models API (`GET /v1/models`) — free and read-only.
 **Rotation:** create a new key → deploy it → confirm with the connectivity check → disable the old key in the console.

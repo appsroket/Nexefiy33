@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { ArrowLeft, CircleCheck, FlaskConical, Info, Pencil } from 'lucide-react'
 import type { Metadata } from 'next'
 import Link from 'next/link'
@@ -21,8 +23,14 @@ import { listEmployeeTools } from '@/modules/employees/server/tools'
 import { approvalText, ConfigSummary } from '@/modules/employees/ui/config-summary'
 import { LifecycleControls, type ActivationSummary } from '@/modules/employees/ui/lifecycle-controls'
 import { MODELS, TIER_LABELS } from '@/modules/models/domain/catalog'
+import { TASK_STATUS_DISPLAY } from '@/modules/tasks/domain/labels'
+import { listTasks } from '@/modules/tasks/server/queries'
+import { canRunTasks } from '@/modules/tasks/server/scheduling'
+import { AssignTaskForm } from '@/modules/tasks/ui/task-controls'
 
 export const metadata: Metadata = { title: 'AI employee' }
+// Assigning a task (or deciding an approval) runs the task after the response, in this route's function.
+export const maxDuration = 300
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -47,7 +55,12 @@ export default async function EmployeePage({
   const { workspace } = gate
   const employee = await getEmployee(workspace.organizationId, id)
   if (!employee) notFound()
-  const [options, query] = [await loadEditorOptions(workspace.organizationId), await searchParams]
+  const [options, query, tasks] = [
+    await loadEditorOptions(workspace.organizationId),
+    await searchParams,
+    await listTasks(workspace.organizationId, { employeeId: id, limit: 10 }),
+  ]
+  const canAssign = employee.state === 'active' && hasMinRole(workspace.role, 'operator')
   const tools = listEmployeeTools()
 
   const current = employee.versions.find((version) => version.id === employee.currentVersionId) ?? null
@@ -164,6 +177,49 @@ export default async function EmployeePage({
             canDelete={employee.state === 'draft' && !employee.activatedAt && hasMinRole(workspace.role, 'operator')}
           />
           {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Tasks"
+        description={
+          employee.state === 'active'
+            ? `Give this employee a bounded task. It runs version ${active?.version ?? '—'} with exactly its tools, limits and approval rules.`
+            : 'Only an active employee can be given tasks.'
+        }
+      >
+        <div className="flex flex-col gap-6">
+          {canAssign ? (
+            <>
+              {canRunTasks() ? null : (
+                <Alert>
+                  <Info aria-hidden="true" />
+                  <AlertDescription>
+                    Tasks can be assigned, but they won’t run on this deployment until an AI model and the Supabase secret key are configured (see
+                    docs/credential-setup.md).
+                  </AlertDescription>
+                </Alert>
+              )}
+              <AssignTaskForm employeeId={employee.id} requestKey={randomUUID()} />
+            </>
+          ) : null}
+          {tasks.length ? (
+            <ul className="flex flex-col divide-y text-sm">
+              {tasks.map((task) => (
+                <li key={task.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <Link href={`/app/tasks/${task.id}`} className="font-medium underline-offset-4 hover:underline">
+                    {task.title}
+                  </Link>
+                  <span className="flex items-center gap-2 text-muted-foreground">
+                    <StatusIndicator tone={TASK_STATUS_DISPLAY[task.status].tone} label={TASK_STATUS_DISPLAY[task.status].label} />
+                    <DateTime value={task.createdAt} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">No tasks yet.</p>
+          )}
         </div>
       </SectionCard>
 

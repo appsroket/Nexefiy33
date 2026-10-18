@@ -44,7 +44,7 @@ function issuesText(issues: { path: PropertyKey[]; message: string }[]): string 
 
 export function createTestToolInvoker(options: TestInvokerOptions): ToolInvoker {
   return {
-    async invoke({ grant, tool, input, callId }): Promise<ToolOutcome> {
+    async invoke({ grant, tool, input, callId, context }): Promise<ToolOutcome> {
       const schema = tool.kind === 'built_in' ? tool.tool.input : tool.action.input
       const parsed = schema.safeParse(input)
       if (!parsed.success) {
@@ -63,7 +63,13 @@ export function createTestToolInvoker(options: TestInvokerOptions): ToolInvoker 
             limit: options.knowledge.maxPassages,
             embedder: options.embedder,
           })
-          return { decision: 'allow', executed: true, isError: false, content: formatEvidenceForModel(evidence) }
+          return {
+            decision: 'allow',
+            executed: true,
+            isError: false,
+            content: formatEvidenceForModel(evidence),
+            suspicious: evidence.passages.some((passage) => passage.metadata.suspectedInstructions),
+          }
         } catch (error) {
           console.error('[employees] knowledge search failed in a test run', redact(error))
           return { decision: 'allow', executed: false, isError: true, content: 'Knowledge search is unavailable right now.' }
@@ -85,8 +91,9 @@ export function createTestToolInvoker(options: TestInvokerOptions): ToolInvoker 
       })
       if (preview.status === 'refused') return { decision: 'refused', executed: false, isError: true, content: preview.error.message }
 
-      // The employee's own rule can add approval, never remove it.
-      const decision = mostRestrictive(grant.approval, preview.decision)
+      // The employee's own rule can add approval, never remove it; so can
+      // instruction-like content the task has already read.
+      const decision = mostRestrictive(grant.approval, preview.decision, context?.suspiciousContentSeen && tool.info.risk !== 'read' ? 'require_approval' : null)
       const proposed = JSON.stringify(parsed.data)
       if (decision === 'deny') {
         return { decision, executed: false, isError: false, content: `Blocked: ${preview.reason} The action was not run.` }
@@ -119,7 +126,7 @@ export function createTestToolInvoker(options: TestInvokerOptions): ToolInvoker 
       switch (result.status) {
         case 'succeeded':
         case 'duplicate':
-          return { decision: 'allow', executed: true, isError: false, content: JSON.stringify(result.output ?? null) }
+          return { decision: 'allow', executed: true, isError: false, untrusted: true, content: JSON.stringify(result.output ?? null) }
         case 'failed':
           return { decision: 'allow', executed: true, isError: true, content: `${tool.info.title} failed: ${result.error.message}` }
         case 'refused':

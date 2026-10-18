@@ -30,7 +30,11 @@ export function scheduleApprovedExecutions(): void {
   })
 }
 
-/** Closes the task that waited on a rejected approval (the execution itself is rejected by decide_approval). */
+/**
+ * Closes a person's action task that waited on a rejected approval (the
+ * execution itself is rejected by decide_approval). Employee tasks are not
+ * closed: they continue and the employee is told the action was rejected.
+ */
 export async function closeRejectedTask(organizationId: string, taskId: string): Promise<void> {
   if (!isFeatureConfigured('supabaseAdmin')) return
   const { error } = await getAdminClient()
@@ -39,5 +43,6 @@ export async function closeRejectedTask(organizationId: string, taskId: string):
     .eq('id', taskId)
     .eq('organization_id', organizationId)
     .eq('status', 'waiting_approval')
+    .is('employee_id', null)
   if (error) console.error('[integrations] closing a rejected task failed', redact({ code: error.code }))
 }

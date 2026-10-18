@@ -191,14 +191,16 @@ export async function runEmployeeTest(request: TestRunRequest, deps: PlaygroundD
     throw error
   }
 
-  const checks = evaluateChecks(expectations, { outcome: result.outcome, reply: result.reply, toolCalls: result.toolCalls })
-  const outcomeResult = runResult({ outcome: result.outcome, reply: result.reply, toolCalls: result.toolCalls }, checks, Boolean(request.testCaseId))
+  // Test runs never wait (the test invoker doesn't request actions) and can't be cancelled.
+  const outcome: RunOutcome = result.outcome === 'waiting_approval' || result.outcome === 'cancelled' ? 'error' : result.outcome
+  const checks = evaluateChecks(expectations, { outcome, reply: result.reply, toolCalls: result.toolCalls })
+  const outcomeResult = runResult({ outcome, reply: result.reply, toolCalls: result.toolCalls }, checks, Boolean(request.testCaseId))
 
   const { error: updateError } = await admin
     .from('employee_test_runs')
     .update({
       result: outcomeResult,
-      outcome: result.outcome,
+      outcome,
       reply: result.reply.slice(0, 20_000) || null,
       transcript: result.transcript as unknown as Json,
       checks: checks as unknown as Json,
@@ -246,7 +248,7 @@ export async function runEmployeeTest(request: TestRunRequest, deps: PlaygroundD
     status: 'finished',
     runId: run.id,
     result: updateError ? 'error' : outcomeResult,
-    outcome: result.outcome,
+    outcome,
     reply: result.reply,
     checks,
     transcript: result.transcript,

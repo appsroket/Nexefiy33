@@ -28,7 +28,7 @@ import { hasMinRole, type Json, type OrganizationRole } from '@/lib/supabase/typ
 import { findAction } from '../connectors/registry'
 import type { ActionDefinition, ConnectorDefinition } from '../connectors/types'
 import { IntegrationError, isIntegrationError, needsReconnect, type NormalizedError } from '../domain/errors'
-import { approverRoleFor, decideAction, evaluatePolicies, MIN_ROLE_TO_RUN_ACTIONS, type PolicyRule, type StoredPolicy } from '../domain/policy'
+import { approverRoleFor, decideAction, evaluatePolicies, MIN_ROLE_TO_RUN_ACTIONS, mostRestrictive, type PolicyRule, type StoredPolicy } from '../domain/policy'
 import { decideRetry } from '../domain/retry'
 import type { ApprovalMode } from '../domain/types'
 import { getAccessToken, markNeedsReauth } from './credentials'
@@ -45,6 +45,23 @@ export interface UserActor {
   role: OrganizationRole
 }
 
+/**
+ * An AI employee working on a task. Its authority is the intersection of the
+ * task's pinned configuration (checked by the runtime), the grants written
+ * when it was activated (employee_tool_permissions, checked here), the
+ * connection, and workspace policy; it never acts as the person who assigned
+ * the task.
+ */
+export interface EmployeeActor {
+  kind: 'employee'
+  employeeId: string
+  employeeVersionId: string
+  taskId: string
+  attemptId: string
+  /** The person who assigned the task (recorded as requester). */
+  requestedBy: string | null
+}
+
 export interface ExecuteRequest {
   organizationId: string
   integrationId: string
@@ -52,7 +69,9 @@ export interface ExecuteRequest {
   input: unknown
   /** Same key ⇒ same execution: a retried request never runs the action twice. */
   idempotencyKey: string
-  actor: UserActor
+  actor: UserActor | EmployeeActor
+  /** A stricter starting point than the action's own rules (e.g. the employee's approval rule); it can only add approval. */
+  approvalFloor?: ApprovalMode
 }
 
 export type ExecuteResult =
@@ -152,7 +171,7 @@ async function loadPolicies(runtime: IntegrationRuntime, organizationId: string)
   return { policies, approvalHours }
 }
 
-async function decide(runtime: IntegrationRuntime, organizationId: string, integrationId: string, action: ActionDefinition) {
+async function decide(runtime: IntegrationRuntime, organizationId: string, integrationId: string, action: ActionDefinition, employeeId?: string | null) {
   const [setting, { policies, approvalHours }] = await Promise.all([
     loadSetting(runtime, organizationId, integrationId, action.key),
     loadPolicies(runtime, organizationId),
@@ -162,9 +181,48 @@ async function decide(runtime: IntegrationRuntime, organizationId: string, integ
     risk: action.risk,
     connectionMode: setting.approvalMode,
     enabled: setting.enabled,
-    policy: evaluatePolicies(policies, { toolKey: action.key, risk: action.risk }),
+    policy: evaluatePolicies(policies, { toolKey: action.key, risk: action.risk, ...(employeeId ? { employeeId } : {}) }),
   })
   return { ...decision, approvalHours }
+}
+
+/** Applies a floor (the employee's grant, a caller's rule): it may add approval, never remove it. */
+function withFloor<T extends { decision: ApprovalMode; reason: string }>(decision: T, floor: ApprovalMode | null | undefined, reason: string): T {
+  if (!floor || mostRestrictive(decision.decision, floor) === decision.decision) return decision
+  return { ...decision, decision: mostRestrictive(decision.decision, floor), reason }
+}
+
+/**
+ * An employee may act only while it is active, on a task of its own that is
+ * running, with the tool granted on this connection at activation. Returns
+ * the grant's decision (a floor) or the reason it may not act.
+ */
+async function checkEmployeeActor(
+  runtime: IntegrationRuntime,
+  request: { organizationId: string; integrationId: string; actionKey: string },
+  actor: EmployeeActor,
+): Promise<{ floor: ApprovalMode } | { error: IntegrationError }> {
+  const [employee, task, grant] = await Promise.all([
+    runtime.admin.from('ai_employees').select('status').eq('id', actor.employeeId).eq('organization_id', request.organizationId).maybeSingle(),
+    runtime.admin.from('tasks').select('status, employee_id').eq('id', actor.taskId).eq('organization_id', request.organizationId).maybeSingle(),
+    runtime.admin
+      .from('employee_tool_permissions')
+      .select('decision')
+      .eq('organization_id', request.organizationId)
+      .eq('employee_id', actor.employeeId)
+      .eq('tool_key', request.actionKey)
+      .eq('integration_id', request.integrationId)
+      .maybeSingle(),
+  ])
+  if (employee.error || task.error || grant.error) {
+    throw new IntegrationError('unavailable', { message: 'The employee’s permissions couldn’t be checked.', mayHaveReachedProvider: false })
+  }
+  if (employee.data?.status !== 'active') return { error: new IntegrationError('forbidden', { message: 'This employee isn’t active, so it can’t act.' }) }
+  if (!task.data || task.data.employee_id !== actor.employeeId || task.data.status !== 'running') {
+    return { error: new IntegrationError('forbidden', { message: 'This task isn’t running for this employee.' }) }
+  }
+  if (!grant.data) return { error: new IntegrationError('forbidden', { message: 'This employee wasn’t granted that action on this connection.' }) }
+  return { floor: grant.data.decision as ApprovalMode }
 }
 
 export type DecisionPreview =
@@ -210,7 +268,8 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
   const found = findAction(request.actionKey)
   if (!found) return refused(new IntegrationError('invalid_input', { message: 'Unknown action.' }))
   const { connector, action } = found
-  if (!hasMinRole(request.actor.role, MIN_ROLE_TO_RUN_ACTIONS)) {
+  const { actor } = request
+  if (actor.kind === 'user' && !hasMinRole(actor.role, MIN_ROLE_TO_RUN_ACTIONS)) {
     return refused(new IntegrationError('forbidden', { message: 'Your role can’t run integration actions in this workspace.' }))
   }
 
@@ -228,30 +287,48 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
     const problem = checkConnection(connection, connector, action)
     if (problem) return refused(problem)
 
-    const decision = await decide(runtime, request.organizationId, request.integrationId, action)
+    let grantFloor: ApprovalMode | null = null
+    if (actor.kind === 'employee') {
+      const checked = await checkEmployeeActor(runtime, request, actor)
+      if ('error' in checked) return refused(checked.error)
+      grantFloor = checked.floor
+    }
+
+    const employeeId = actor.kind === 'employee' ? actor.employeeId : null
+    let decision = await decide(runtime, request.organizationId, request.integrationId, action, employeeId)
+    decision = withFloor(decision, grantFloor, 'The employee’s permission for this action.')
+    decision = withFloor(decision, request.approvalFloor, actor.kind === 'employee' ? 'The employee’s approval rule for this task.' : 'Requested approval.')
     const fingerprint = actionFingerprint(action.key, request.integrationId, input)
     const summary = action.summarize(parsed.data).slice(0, 500)
     const now = runtime.now()
 
-    // Task: the unit of work this action belongs to (a manual request here).
-    const taskKey = `integration:${request.idempotencyKey}`
-    const { data: task, error: taskError } = await runtime.admin
-      .from('tasks')
-      .insert({
-        organization_id: request.organizationId,
-        title: summary,
-        source: 'manual',
-        status: decision.decision === 'require_approval' ? 'waiting_approval' : 'running',
-        idempotency_key: taskKey,
-        max_attempts: 1,
-        attempt_count: 1,
-        started_at: now.toISOString(),
-        created_by: request.actor.userId,
-      })
-      .select('id')
-      .single()
-    if (taskError?.code === '23505') return await duplicateResult(runtime, request.organizationId, request.idempotencyKey)
-    if (taskError || !task) throw new IntegrationError('unavailable', { message: 'The request couldn’t be recorded.', mayHaveReachedProvider: false })
+    // Task: the unit of work this action belongs to. An employee's action
+    // belongs to the employee's task; a person's action gets its own task.
+    let task: { id: string }
+    if (actor.kind === 'employee') {
+      task = { id: actor.taskId }
+    } else {
+      const taskKey = `integration:${request.idempotencyKey}`
+      const { data, error: taskError } = await runtime.admin
+        .from('tasks')
+        .insert({
+          organization_id: request.organizationId,
+          title: summary,
+          source: 'manual',
+          status: decision.decision === 'require_approval' ? 'waiting_approval' : 'running',
+          idempotency_key: taskKey,
+          max_attempts: 1,
+          attempt_count: 1,
+          started_at: now.toISOString(),
+          created_by: actor.userId,
+        })
+        .select('id')
+        .single()
+      if (taskError?.code === '23505') return await duplicateResult(runtime, request.organizationId, request.idempotencyKey)
+      if (taskError || !data) throw new IntegrationError('unavailable', { message: 'The request couldn’t be recorded.', mayHaveReachedProvider: false })
+      task = data
+    }
+    const ownsTask = actor.kind === 'user'
 
     const status = decision.decision === 'deny' ? 'skipped' : decision.decision === 'require_approval' ? 'awaiting_approval' : 'executing'
     const { data: execution, error: executionError } = await runtime.admin
@@ -270,7 +347,8 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
         policy_reason: decision.reason,
         policy_id: decision.policyId,
         idempotency_key: request.idempotencyKey,
-        requested_by: request.actor.userId,
+        requested_by: actor.kind === 'user' ? actor.userId : actor.requestedBy,
+        ...(actor.kind === 'employee' ? { employee_id: actor.employeeId, task_attempt_id: actor.attemptId } : {}),
         ...(status === 'executing'
           ? { attempt_count: 1, started_at: now.toISOString(), lease_expires_at: new Date(now.getTime() + EXECUTION_LEASE_MS).toISOString() }
           : {}),
@@ -281,13 +359,13 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
     if (executionError?.code === '23505') return await duplicateResult(runtime, request.organizationId, request.idempotencyKey)
     if (executionError?.code === '23514') {
       // The database refuses inputs that look like credentials (private.jsonb_contains_secret).
-      await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
+      if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
       return refused(new IntegrationError('invalid_input', { message: 'The input contains something that looks like a password, token or API key, so it wasn’t sent.' }))
     }
     if (executionError || !execution) throw new IntegrationError('unavailable', { message: 'The request couldn’t be recorded.', mayHaveReachedProvider: false })
 
     if (status === 'skipped') {
-      await finishTask(runtime, request.organizationId, task.id, 'skipped', null)
+      if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'skipped', null)
       return { status: 'denied', executionId: execution.id, reason: decision.reason }
     }
 
@@ -298,6 +376,7 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
           organization_id: request.organizationId,
           tool_execution_id: execution.id,
           task_id: task.id,
+          ...(actor.kind === 'employee' ? { employee_id: actor.employeeId, employee_version_id: actor.employeeVersionId } : {}),
           policy_id: decision.policyId,
           action_summary: summary,
           // Approvers see exactly what will be sent.
@@ -321,7 +400,7 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
           .update({ status: 'cancelled', error: { code: 'unavailable', message: 'The approval request couldn’t be created.' } })
           .eq('id', execution.id)
           .eq('organization_id', request.organizationId)
-        await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
+        if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
         throw new IntegrationError('unavailable', { message: 'The approval request couldn’t be created.', mayHaveReachedProvider: false })
       }
       return { status: 'awaiting_approval', executionId: execution.id, approvalRequestId: approval.id }
@@ -382,6 +461,8 @@ interface ExecutionRow {
   id: string
   organization_id: string
   task_id: string
+  /** Set when an employee's task owns this execution; the task runtime then finishes the task, not the executor. */
+  employee_id: string | null
   integration_id: string | null
   tool_key: string
   status: string
@@ -399,7 +480,7 @@ export async function runExecution(
 ): Promise<ExecuteResult> {
   const { data: row, error } = await runtime.admin
     .from('tool_executions')
-    .select('id, organization_id, task_id, integration_id, tool_key, status, input_sha256, pending_input')
+    .select('id, organization_id, task_id, employee_id, integration_id, tool_key, status, input_sha256, pending_input')
     .eq('id', claim.executionId)
     .eq('organization_id', claim.organizationId)
     .maybeSingle()
@@ -430,8 +511,26 @@ export async function runExecution(
     connection = await loadConnection(runtime, execution.organization_id, execution.integration_id)
     const problem = checkConnection(connection, connector, action)
     if (problem) return fail(problem)
-    const decision = await decide(runtime, execution.organization_id, execution.integration_id, action)
+    const decision = await decide(runtime, execution.organization_id, execution.integration_id, action, execution.employee_id)
     if (decision.decision === 'deny') return fail(new IntegrationError(decision.policyId ? 'denied_by_policy' : 'action_disabled', { message: decision.reason }))
+    if (execution.employee_id) {
+      // An approval doesn't outlive the employee's pause or a narrowed grant.
+      const [grant, employee] = await Promise.all([
+        runtime.admin
+          .from('employee_tool_permissions')
+          .select('decision')
+          .eq('organization_id', execution.organization_id)
+          .eq('employee_id', execution.employee_id)
+          .eq('tool_key', execution.tool_key)
+          .eq('integration_id', execution.integration_id)
+          .maybeSingle(),
+        runtime.admin.from('ai_employees').select('status').eq('id', execution.employee_id).eq('organization_id', execution.organization_id).maybeSingle(),
+      ])
+      if (grant.error || employee.error) throw new IntegrationError('unavailable', { message: 'The employee’s permissions couldn’t be checked.', mayHaveReachedProvider: false })
+      if (!grant.data || grant.data.decision === 'deny' || employee.data?.status !== 'active') {
+        return fail(new IntegrationError('forbidden', { message: 'The employee is no longer active or no longer has this action.' }))
+      }
+    }
   } catch (failure) {
     if (isIntegrationError(failure)) return fail(failure)
     throw failure
@@ -523,7 +622,7 @@ async function finishExecution(
       .eq('id', execution.id)
       .eq('organization_id', execution.organization_id)
       .eq('status', 'executing')
-    await finishTask(runtime, execution.organization_id, execution.task_id, 'failed', { error })
+    if (!execution.employee_id) await finishTask(runtime, execution.organization_id, execution.task_id, 'failed', { error })
     await recordEvent(runtime, execution.organization_id, execution.id, 'tool.failed', 'error', error.message, { code: error.code })
     return { status: 'failed', executionId: execution.id, error }
   }
@@ -540,7 +639,7 @@ async function finishExecution(
     // The lease was lost and someone else finished or failed this execution.
     console.error('[integrations] execution finished after losing its lease', { executionId: execution.id })
   }
-  await finishTask(runtime, execution.organization_id, execution.task_id, 'succeeded', { result: { action: execution.tool_key, output: stored } })
+  if (!execution.employee_id) await finishTask(runtime, execution.organization_id, execution.task_id, 'succeeded', { result: { action: execution.tool_key, output: stored } })
   await recordEvent(runtime, execution.organization_id, execution.id, 'tool.succeeded', 'info', 'Action completed.')
   return { status: 'succeeded', executionId: execution.id, output: outcome.output }
 }

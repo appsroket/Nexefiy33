@@ -78,6 +78,13 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - **Spending is capped** per task (cost, steps, tool calls, seconds) and per month (budget, counted from recorded usage); the runtime stops before the next step could cross a limit.
 - Status, version pointers and test results can't be written by clients (column grants; `change_employee_status`, `review_employee_test_run`); test runs are written by the server after a role check, scoped to the verified organization.
 
+### 5.5 Employee tasks (implemented in Phase 10, ADR-025)
+- **The employee is its own actor.** Integration actions in a task go through the executor as the employee: active, on its own running task, with the tool granted on that connection at activation; the version's approval rule and the suspicious-content rule can only add approval. Before an approved action runs, the employee's status and grant are checked again. The organization comes from the task; the connection from the grant; nothing from model output.
+- **Results are data.** Integration results are scrubbed of credential-shaped strings and framed as untrusted; instruction-like content is flagged and makes every later write in the task wait for approval.
+- **Claims are verified.** A task succeeds only if every action the employee cites is a succeeded tool execution of that task in the database; unbacked claims, pending and failed actions are flagged for review.
+- **Bounded:** steps, tool calls, active time, cost per task, monthly budget, model-call retries (2), attempts (3); a cancelled task or paused employee stops at the next step.
+- **Clients** read tasks, attempts (not checkpoints), events, evidence and executions of their organizations; they change tasks only through `assign_employee_task`, `cancel_employee_task` and `reply_to_employee_task` (operators).
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).

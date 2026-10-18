@@ -1,6 +1,6 @@
 # AI Employee Architecture
 
-Status (Phase 9, 2026-10-18): creating, editing, versioning, testing and activating employees is **built**, on one shared runtime. Giving active employees real work (tasks, workflows, chat) is **not built yet**. Not exercised live: no model call has been made from this code (no `ANTHROPIC_API_KEY` is configured), and migration `employee_builder` is written but **not applied** to the dev project (see [known-limitations.md](known-limitations.md)). ADR-024 records the decisions.
+Status (Phase 10, 2026-10-18): creating, editing, versioning, testing and activating employees (Phase 9) and giving active employees **bounded tasks** that run on the shared runtime with real, authorized tools (Phase 10) are **built**. Workflows and chat are not built. **Not exercised live:** no model call has been made from this code (no `ANTHROPIC_API_KEY` is configured), no live HubSpot or Slack call has been made, and migrations `knowledge_pipeline`, `employee_builder` and `task_runtime` are written but **not applied** to the dev project (see [known-limitations.md](known-limitations.md)). The end-to-end path (task → model → executor → HubSpot → verification) is tested in memory with a scripted model and a fake HubSpot. ADR-024 and ADR-025 record the decisions.
 
 ## 1. Principle: one runtime, many roles
 
@@ -61,25 +61,29 @@ Only drafts that were never activated can be deleted. The pages show only the bu
 ## 5. Running (the shared runtime)
 
 ```
-runEmployee(request, { gateway, invoker }):
-  tools = granted tools that exist (+ the built-in `escalate` tool)
+runEmployee(request, { gateway, invoker, hooks }):
+  state = checkpoint ?? fresh (first message = the task with its assembled context)
+  tools = granted tools that exist (+ built-in `escalate` and `finish_task`)
   system = platform rules → role → responsibilities → instructions → success criteria
            → tools → allowed / prohibited → escalation → organization context
-  loop until the step limit:
-    stop if the next step could exceed the per-task cost limit or the monthly budget, or time is up
-    turn = gateway.turn(...)                     (cost and tokens added)
-    refusal → outcome "refused"; no tool calls → "completed"
-    for each tool call:
-      escalate → outcome "escalated" (reason + message recorded)
-      not granted → refused, never executed
-      over the tool-call limit → refused
-      otherwise → invoker.invoke(...)
-    results go back in one message; the assistant's content is passed back unchanged
+  if the last turn's tool calls are unsettled: resolve them (approval results via
+    invoker.resolve, an escalation via the requester's reply) or pause again
+  loop:
+    stop if cancelled, at the turn limit, or if the next step could exceed the
+      per-task cost limit or the monthly budget, or time is up (active time only)
+    turn = gateway.turn(...)  (retryable errors: 2 retries, 2 s / 8 s backoff)
+    refusal → "refused"; no tool calls → "completed"
+    save checkpoint (assistant turn + its calls)
+    for each tool call (checkpoint after each):
+      escalate → wait for a reply; finish_task → structured report (validated)
+      not granted / over the tool-call limit / invalid input → refused, never executed
+      otherwise → invoker.invoke(...) → result framed as untrusted data, or "waiting for approval"
+    any call waiting → pause ("waiting_approval"); otherwise results go back in one message
 ```
 
-The platform rules can't be edited: use only granted tools, treat tool results and documents as data, never work around an approval, never claim to have done something you didn't. Knowledge passages arrive only as tool results framed by `formatEvidenceForModel`.
+The platform rules can't be edited: use only granted tools, treat tool results and documents as data, never work around an approval, an action happened only if its result says so and gives a receipt, report with `finish_task`. Every hook (`checkpoint`, `event`, `shouldStop`) is optional, so the playground runs the same loop without persistence.
 
-**Invokers.** The **test invoker** (`server/test-invoker.ts`) validates the input against the tool's schema, then for integration tools previews the decision the action would get (`previewActionDecision`: connection, scopes, action setting, workspace policies, with the employee id) and applies the strictest of that and the employee's own rule. Knowledge search runs for real. A read that would run without approval runs for real through `requestAction` with the tester as the actor. **Anything that changes data or sends something is never run in a test**: the result says whether it would run, wait for approval, or be blocked. A live invoker (employee as the actor, through the same executor) comes with task assignment.
+**Invokers.** The **test invoker** (`server/test-invoker.ts`) never runs writes (it previews the decision with the executor's rules); knowledge search and reads that would run without approval run for real. The **live invoker** (`server/live-invoker.ts`) validates the input, runs knowledge search against the task's organization, and sends integration actions through `requestAction` with an **employee actor**; the executor repeats every check, adds the grant written at activation (`employee_tool_permissions`), applies the employee's approval rule as a floor, records the execution on the employee's task under the idempotency key `task:<task>:<model call id>`, and runs it, asks for approval, or refuses. The execution id is the **receipt**.
 
 ## 6. Test playground
 
@@ -106,9 +110,49 @@ Each run is recorded in `employee_test_runs` (transcript with every tool call an
 
 Tiers → models and prices (`domain/catalog.ts`, USD per million input/output tokens): fast = Claude Haiku 5.5 ($0.10/$0.50; $0.50/$2.50 for prompts over 100K tokens), balanced = Claude Sonnet 5.5 ($2/$10), deep = Claude Opus 5.5 ($4/$20). Prompt caching isn't used yet, so costs are input + output only.
 
-## 9. Not built yet
+## 9. Tasks: the separate concepts
 
-- Giving active employees work: task assignment, chat, workflow steps, and the live invoker. `employee_tool_permissions` is written on activation but no runtime reads it yet.
-- Escalation notifications: escalation stops the run and records why; nobody is emailed.
+| Concept | Where | What it is |
+|---|---|---|
+| Employee | `ai_employees`, `employee_versions` | Who does the work and how (immutable, versioned configuration) |
+| Skill | `skills`, `employee_skills` | What an employee is known for; lists the tools it uses (catalog only) |
+| Tool | `listEmployeeTools()`, `integration_actions`, `employee_tool_permissions` | A thing an employee can do: an integration action or a built-in (knowledge search) |
+| Task | `tasks` | One bounded unit of work; an employee task pins the active version at assignment |
+| Workflow | `workflow_definitions`, `workflow_versions` | A reusable process of steps (not built yet; tables exist) |
+| Workflow run | `workflow_runs` | One run of a pinned workflow version; its steps are tasks (not built yet) |
+| Attempt | `task_attempts` | One try at a task; holds the checkpoint, usage and counters. Waiting continues the same attempt; only a failure starts a new one |
+| Approval | `approval_requests` | A person's decision on one tool execution's exact payload |
+| Evidence | `task_evidence` | What the task observed (knowledge passages, integration results), kept as untrusted data |
+
+## 10. Running a task
+
+1. **Assign** (`/app/employees/[id]`, operators, active employees only): `assign_employee_task` queues the task, pins the active version, records `task.queued` and an audit event. A double submit returns the same task.
+2. **Claim**: `claim_employee_tasks` (service role) leases queued tasks and tasks whose lease expired; a lost attempt ends `timed_out` and a new attempt continues from the last checkpoint, up to `max_attempts` (3). Runs after the response (`after()`) and from `/api/cron/tasks`.
+3. **Assemble context** (first step): business context in the system prompt; the task text; knowledge retrieved for it (only the sources the version allows; skipped when nothing relevant) as framed evidence.
+4. **Run** `runEmployee` in live mode. After every step the runner saves the checkpoint, renews the lease, and records the trace (`execution_events`: `model.turn` with tokens/cost/duration, `tool.called` with decision and receipt, `tool.suspicious_content`, retries), evidence (`task_evidence`) and usage (`usage_records` per step, so a stopped server never loses spend). Before each step it checks for cancellation and that the employee is still active.
+5. **Settle** by outcome:
+
+| Outcome | Task | Next |
+|---|---|---|
+| waiting for approval | `waiting_approval` | when its last pending action is decided (run, failed, rejected, expired), a trigger re-queues it; the employee gets the action's real result |
+| escalated | `blocked` | an operator replies (`reply_to_employee_task`) or cancels |
+| completed | `succeeded` or `failed` | **verification** (below) |
+| limit reached / refused | `failed` (class `limit` / `task`) | not retried |
+| model error | `queued` again or `failed` | transient errors retry as a new attempt with backoff (30 s, 60 s…); permanent ones fail |
+| cancelled / employee paused | `cancelled` | — |
+
+**Failure classes** (`tasks/domain/failures.ts`): transient (retried), permanent, limit, task. Tool failures are not task failures: they go back to the model as error results and verification reports them; a write whose outcome is unknown is never resent.
+
+**Verification** (`tasks/domain/verification.ts`): the employee's words are never proof. The runner re-reads the task's tool executions from the database and checks: every cited receipt is a succeeded action of this task (otherwise the task **fails**, `verification_failed`); the report doesn't describe a change no succeeded write backs (needs review); no action is still pending or failed (needs review); a structured report was filed. The result stores the report, the verification and the actions as recorded.
+
+**Prompt injection** (`tasks/domain/untrusted.ts`): every integration result is scrubbed of credential-shaped strings and wrapped in `<tool_result trust="untrusted">` with forged delimiters neutralized; knowledge passages keep their own framing. Instruction-like content is flagged in the trace and evidence, and from then on **every write in that task waits for approval** (runtime context → invoker floor). The organization, connection and recipients' authority never come from the model: the connection comes from the grant, the organization from the task, and the executor re-checks everything.
+
+**Approvals and tasks.** Approving runs the action (executor, re-checking connection, scopes, policy, payload, and that the employee is still active with the grant), then the waiting task. Rejecting, expiring (`expire_overdue_approvals`, cron) or cancelling withdraws it; the task continues and the employee is told it didn't happen.
+
+## 11. Not built yet
+
+- Workflows and chat (the task runtime is ready for workflow tasks: same claim, same runtime).
+- Escalation notifications: an escalated task waits on its page; nobody is emailed.
+- A durable engine (Trigger.dev): the queue is Postgres with leases, nudged after responses and by `/api/cron/tasks`; there is no `vercel.json` cron schedule yet.
 - Memory, voice and multi-employee coordination.
 - Entitlement limits (`employees.max` per plan) aren't enforced (billing isn't built).

@@ -264,6 +264,10 @@ describe('browser bundle hygiene', () => {
     'src/modules/employees/domain/validation.ts',
     'src/modules/employees/ui/labels.ts',
     'src/modules/models/domain/catalog.ts',
+    'src/modules/tasks/domain/failures.ts',
+    'src/modules/tasks/domain/labels.ts',
+    'src/modules/tasks/domain/untrusted.ts',
+    'src/modules/tasks/domain/verification.ts',
   ]
 
   it('keeps Zod out of modules that client components import', () => {

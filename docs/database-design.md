@@ -96,9 +96,10 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 | Table | Purpose | Notes |
 |---|---|---|
 | `workflow_runs` | Run of a pinned workflow version | Status lifecycle, `engine_run_id`, idempotency key |
-| `tasks` | Units of work (workflow node, chat, manual, API, schedule) | Pins `employee_version_id`; attempts bounded by `max_attempts` |
+| `tasks` | Units of work (workflow node, chat, manual, API, schedule) | Pins `employee_version_id`; attempts bounded by `max_attempts`. Employee tasks (Phase 10): assigned through `assign_employee_task`, `lease_expires_at` set exactly while running (claimed by `claim_employee_tasks`), `cancel_requested_at`; title/instructions secret-scanned; re-queued by trigger when their last pending tool execution finishes |
 | `task_dependencies` | Task DAG (M:N) | Same run only; cycles rejected by trigger |
-| `task_attempts` | Retry history | `attempt_number` unique per task |
+| `task_attempts` | Tries at a task | `attempt_number` unique per task; usage (`model`, tokens, `cost_micros`, `turn_count`, `tool_call_count`, `active_ms`) and the runtime `checkpoint` (secret-scanned, ≤ 2 MB, **not selectable by clients**). Waiting continues an attempt; a failure or lost worker starts a new one |
+| `task_evidence` | What a task observed (knowledge passages, integration results) | Phase 10; excerpt ≤ 4000 chars, secret-scanned; immutable; composite FKs to task, attempt, tool execution, knowledge source (chunks by id only); server writes, members read |
 | `tool_executions` | Each tool call: redacted input, `input_sha256`, policy decision, status, `attempt_count`, `requested_by` | Proposed action immutable after insert; `deny` ⇒ `skipped`; `require_approval` cannot run without an approved approval for the exact fingerprint. `pending_input` (exact validated input until it runs) is not selectable by clients (column grants), can be cleared but not replaced, and is cleared automatically when the execution ends; `executing` ⇔ `lease_expires_at` set. `claim_tool_executions` (service role) leases approved executions and expired leases |
 | `execution_events` | Append-only event stream | Secret-scanned; updates rejected |
 
@@ -152,9 +153,10 @@ To evolve a format: add a new branch (`when 2 then …`) in a new migration with
 | `public.change_employee_status` | Move status and version pointers, sync grants on activation, write the activation audit event | Role per action (operator: start testing, back to draft, pause; admin: activate, resume, archive, restore) checked with `private.has_min_role` on the employee's own organization; activation needs the latest version, its tests passed (`private.employee_version_test_status`) and the typed name; generic P0002 for unknown ids or too-low roles |
 | `public.review_employee_test_run` | Clients can't write test runs | Operator of the run's organization; only `needs_review` → passed/failed or passed → failed |
 | `private.apply_employee_version` | Trigger: make a new version current and copy its profile (clients can't update those columns) | Updates only the inserted version's own employee in its organization; refuses archived employees |
+| `public.assign_employee_task`, `cancel_employee_task`, `reply_to_employee_task` | Create and change tasks, attempts, approvals and events clients can't write | Operator of the task's (or employee's) organization via `private.has_min_role`; assignment only to active employees, pinned to the active version, idempotent per key; credential-shaped text refused; generic P0002 for unknown ids or too-low roles; `authenticated` only |
 | `public.get_invitation` | Lets an invitee see an invitation before joining (they can't read invitation rows) | Only by token (32 random bytes; malformed tokens return nothing); returns the workspace name, role, status, invited address and whether it matches the caller's confirmed email; `authenticated` only |
 
-Phase 8's `consume_integration_rate_limit` and `claim_tool_executions` are SECURITY INVOKER and executable only by `service_role`. Phase 9's `create_employee`, `save_employee_version` and `employee_test_summary` are SECURITY INVOKER (RLS applies).
+Phase 8's `consume_integration_rate_limit` and `claim_tool_executions`, and Phase 10's `claim_employee_tasks` and `expire_overdue_approvals`, are SECURITY INVOKER and executable only by `service_role`; the trigger `private.requeue_task_after_tool_execution` runs as the caller (the executor's service role, or `decide_approval`'s definer). Phase 9's `create_employee`, `save_employee_version` and `employee_test_summary` are SECURITY INVOKER (RLS applies).
 
 The Supabase security advisor reports these RPCs (WARN, *authenticated can execute SECURITY DEFINER*; five while `knowledge_pipeline` is unapplied) and four tables with RLS but no policies (INFO, `integration_secrets`, `integration_oauth_states`, `integration_rate_limit_windows`, `provider_webhook_events`). Both are intentional and covered by tests.
 
@@ -178,11 +180,12 @@ The Supabase security advisor reports these RPCs (WARN, *authenticated can execu
 | 20261018145032 | business_context | `company_settings` JSON schema, `business_context_items` (Phase 7) |
 | 20261018154440 | integration_framework | OAuth states, refresh lease, rate-limit windows + `consume_integration_rate_limit`, connection health, tool-execution pending input/attempts/lease + `claim_tool_executions`, pending-input column grants (Phase 8) |
 | (pending) | employee_builder | employee lifecycle (`testing_started_at`, `active_version_id`, generated `lifecycle_status`), config schema v2, `employee_test_cases`, `employee_test_runs`, `create_employee`, `save_employee_version`, `change_employee_status`, `review_employee_test_run`, `employee_test_summary`, column grants, delete only unactivated drafts, skills catalog limited to real tools (Phase 9; written as `20261018190000`, rename to the recorded version when applied) |
+| (pending) | task_runtime | task leases and cancellation, attempt usage + checkpoint (column grants), `task_evidence`, `assign_employee_task`, `claim_employee_tasks`, `cancel_employee_task`, `reply_to_employee_task`, `expire_overdue_approvals`, re-queue trigger on tool executions (Phase 10; written as `20261018220000`, apply after the two below) |
 | (pending) | knowledge_pipeline | `knowledge` bucket + storage policies, source processing columns, business context sources + sync trigger, chunk `search_vector`, `search_knowledge`, `claim_knowledge_sources`, `reprocess_knowledge_source` (Phase 7) |
 
 ## 8. Known gaps (by design, revisit later)
 
 - `created_by` / `updated_by`-style user references are not indexed; user deletion is rare. The performance advisor lists them (INFO).
 - When an employee is deleted, `tasks.employee_version_id` keeps the old id if `employee_id` was cleared first (the composite FK is then not enforced). Historical only; no cross-tenant risk.
-- Approval expiry is applied when someone tries to decide; a scheduled job to expire stale approvals belongs to the durable-execution phase.
+- Approval expiry: `expire_overdue_approvals` (Phase 10) runs from `/api/cron/tasks`; there is no cron schedule yet, so until then expiry also happens when someone tries to decide.
 - Retention jobs (`execution_events`, webhook events) are not scheduled yet.

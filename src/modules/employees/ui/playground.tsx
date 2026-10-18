@@ -32,7 +32,9 @@ import { DECISION_LABELS, OUTCOME_LABELS, RUN_RESULT_DISPLAY, SELECT_CLASS } fro
 
 const IDLE: TestRunState = { status: 'idle' }
 
-export function Transcript({ entries }: { entries: readonly TranscriptEntry[] }) {
+const REPORT_STATUS_LABELS = { completed: 'completed', partially_completed: 'partly completed', not_completed: 'not completed' } as const
+
+export function Transcript({ entries, live = false }: { entries: readonly TranscriptEntry[]; live?: boolean }) {
   return (
     <ol className="flex flex-col gap-3">
       {entries.map((entry, index) => (
@@ -57,7 +59,12 @@ export function Transcript({ entries }: { entries: readonly TranscriptEntry[] })
                     tone={entry.decision === 'allow' ? 'success' : entry.decision === 'require_approval' ? 'warning' : 'danger'}
                     label={entry.executed ? 'Ran' : DECISION_LABELS[entry.decision]}
                   />
-                  {!entry.executed && entry.decision !== 'refused' ? <span className="text-xs text-muted-foreground">Not carried out (test run)</span> : null}
+                  {!entry.executed && entry.decision !== 'refused' ? (
+                    <span className="text-xs text-muted-foreground">
+                      {live ? (entry.decision === 'require_approval' ? 'Waiting for approval' : 'Not carried out') : 'Not carried out (test run)'}
+                    </span>
+                  ) : null}
+                  {entry.executionId ? <span className="text-xs text-muted-foreground">Receipt {entry.executionId.slice(0, 8)}</span> : null}
                 </div>
                 <pre className="max-h-40 overflow-auto rounded-md bg-muted p-2 text-xs">{JSON.stringify(entry.input, null, 2)}</pre>
                 <pre className={`max-h-40 overflow-auto rounded-md p-2 text-xs whitespace-pre-wrap ${entry.isError ? 'bg-destructive/10' : 'bg-muted/60'}`}>{entry.result}</pre>
@@ -69,6 +76,32 @@ export function Transcript({ entries }: { entries: readonly TranscriptEntry[] })
               <div>
                 <p className="font-medium">Escalated: {entry.reason}</p>
                 <p className="whitespace-pre-wrap">{entry.message}</p>
+              </div>
+            </>
+          ) : entry.kind === 'approval_result' ? (
+            <>
+              <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Approved action result" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="text-xs font-semibold">{entry.toolKey}</code>
+                  <StatusIndicator tone={entry.executed && !entry.isError ? 'success' : 'danger'} label={entry.executed ? (entry.isError ? 'Failed' : 'Ran after approval') : 'Did not run'} />
+                  <span className="text-xs text-muted-foreground">Receipt {entry.executionId.slice(0, 8)}</span>
+                </div>
+                <pre className={`max-h-40 overflow-auto rounded-md p-2 text-xs whitespace-pre-wrap ${entry.isError ? 'bg-destructive/10' : 'bg-muted/60'}`}>{entry.result}</pre>
+              </div>
+            </>
+          ) : entry.kind === 'reply' ? (
+            <>
+              <User className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Requester reply" />
+              <p className="whitespace-pre-wrap">{entry.text}</p>
+            </>
+          ) : entry.kind === 'report' ? (
+            <>
+              <CircleCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Report" />
+              <div>
+                <p className="font-medium">Report: {REPORT_STATUS_LABELS[entry.status]}</p>
+                <p className="whitespace-pre-wrap">{entry.summary}</p>
+                {entry.receipts.length ? <p className="text-xs text-muted-foreground">Cites {entry.receipts.length} receipt(s)</p> : null}
               </div>
             </>
           ) : (

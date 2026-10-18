@@ -66,12 +66,12 @@ export const NAVIGATION: readonly NavSection[] = [
         keywords: ['automation', 'process', 'flows'],
       },
       {
-        title: 'Activity',
-        href: '/app/activity',
+        title: 'Tasks',
+        href: '/app/tasks',
         icon: 'activity',
-        description: 'Follow every task your AI employees run, step by step.',
-        availability: 'planned',
-        keywords: ['tasks', 'runs', 'history', 'log'],
+        description: 'Follow every task your AI employees run, step by step: actions, approvals, evidence and verification.',
+        availability: 'available',
+        keywords: ['activity', 'runs', 'history', 'log', 'work'],
       },
       {
         title: 'Approvals',

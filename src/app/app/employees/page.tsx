@@ -46,8 +46,8 @@ export default async function EmployeesPage() {
       <PageHeader title={item.title} description={item.description} actions={newButton} />
       <p className="max-w-2xl text-sm text-muted-foreground">
         Every employee runs on the same runtime and can use only the tools it is granted. A new employee starts as a draft; it is tested in the
-        playground and an admin activates a version once its tests pass. Giving active employees work (tasks, workflows, chat) arrives in a later
-        release.
+        playground and an admin activates a version once its tests pass. Active employees can be given bounded tasks from their page; workflows and
+        chat arrive in a later release.
       </p>
       {employees.length ? (
         <Table>

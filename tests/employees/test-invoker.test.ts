@@ -101,7 +101,8 @@ describe('test tool invoker', () => {
     preview.mockResolvedValue({ status: 'ok', decision: 'allow', reason: 'Default for this action.' })
     requestAction.mockResolvedValue({ status: 'succeeded', executionId: 'x', output: { contacts: [], total: 0 } })
     const outcome = await invoker().invoke(call('hubspot.contacts.search', { email: 'jane@example.test' }))
-    expect(outcome).toEqual({ decision: 'allow', executed: true, isError: false, content: '{"contacts":[],"total":0}' })
+    // Provider data is marked untrusted, so the runtime frames it as data.
+    expect(outcome).toEqual({ decision: 'allow', executed: true, isError: false, untrusted: true, content: '{"contacts":[],"total":0}' })
     expect(requestAction.mock.calls[0]![1]).toMatchObject({
       organizationId: ORG,
       integrationId: HUBSPOT,

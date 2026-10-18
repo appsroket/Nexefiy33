@@ -1,6 +1,7 @@
 // Approving and rejecting: the decision goes through decide_approval under the
 // user's session (role, expiry and payload fingerprint are checked in SQL,
-// pgTAP 007), an approval schedules the run, a rejection closes the task.
+// pgTAP 007), an approval schedules the run (then any employee task waiting
+// on it), a rejection closes a person's task and lets an employee's continue.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,7 +10,7 @@ import { ORG, USER } from '../helpers/integration-fixtures'
 
 let db: FakeSupabase
 let signedIn = true
-const scheduleApprovedExecutions = vi.fn()
+const scheduleTaskProcessing = vi.fn()
 const closeRejectedTask = vi.fn(async (_org: string, _task: string) => {})
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
@@ -18,8 +19,10 @@ vi.mock('@/lib/supabase/server', () => ({
     Object.assign(db, { auth: { getUser: async () => (signedIn ? { data: { user: { id: USER } }, error: null } : { data: { user: null }, error: {} }) } }),
 }))
 vi.mock('@/modules/integrations/server/scheduling', () => ({
-  scheduleApprovedExecutions: () => scheduleApprovedExecutions(),
   closeRejectedTask: (org: string, task: string) => closeRejectedTask(org, task),
+}))
+vi.mock('@/modules/tasks/server/scheduling', () => ({
+  scheduleTaskProcessing: (...args: unknown[]) => scheduleTaskProcessing(...args),
 }))
 
 const { decideApproval } = await import('@/modules/governance/server/approval-actions')
@@ -37,7 +40,7 @@ function form(values: Record<string, string>) {
 beforeEach(() => {
   db = new FakeSupabase()
   signedIn = true
-  scheduleApprovedExecutions.mockClear()
+  scheduleTaskProcessing.mockClear()
   closeRejectedTask.mockClear()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -55,7 +58,7 @@ describe('decideApproval', () => {
     db.rpcHandlers.decide_approval = () => ({ data: { status: 'approved', organization_id: ORG, task_id: TASK }, error: null })
     expect(await decideApproval({ status: 'idle' }, form({ note: ' looks right ' }))).toMatchObject({ status: 'success' })
     expect(db.rpcCalls[0]).toEqual({ name: 'decide_approval', args: { p_request_id: REQUEST, p_decision: 'approved', p_payload_sha256: HASH, p_note: 'looks right' } })
-    expect(scheduleApprovedExecutions).toHaveBeenCalledOnce()
+    expect(scheduleTaskProcessing).toHaveBeenCalledExactlyOnceWith({ approvedActions: true })
     expect(closeRejectedTask).not.toHaveBeenCalled()
   })
 
@@ -63,7 +66,8 @@ describe('decideApproval', () => {
     db.rpcHandlers.decide_approval = () => ({ data: { status: 'rejected', organization_id: ORG, task_id: TASK }, error: null })
     expect(await decideApproval({ status: 'idle' }, form({ decision: 'rejected' }))).toMatchObject({ status: 'success', message: expect.stringContaining('will not run') })
     expect(closeRejectedTask).toHaveBeenCalledWith(ORG, TASK)
-    expect(scheduleApprovedExecutions).not.toHaveBeenCalled()
+    // Only queued tasks run (an employee's task continues and is told the action was rejected).
+    expect(scheduleTaskProcessing).toHaveBeenCalledExactlyOnceWith()
   })
 
   it('explains refusals from the database', async () => {
@@ -73,6 +77,6 @@ describe('decideApproval', () => {
     expect(await decideApproval({ status: 'idle' }, form({}))).toMatchObject({ message: expect.stringContaining('higher role') })
     db.rpcHandlers.decide_approval = () => ({ data: { status: 'expired', organization_id: ORG, task_id: TASK }, error: null })
     expect(await decideApproval({ status: 'idle' }, form({}))).toMatchObject({ status: 'error', message: expect.stringContaining('expired') })
-    expect(scheduleApprovedExecutions).not.toHaveBeenCalled()
+    expect(scheduleTaskProcessing).not.toHaveBeenCalled()
   })
 })
