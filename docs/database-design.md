@@ -77,9 +77,11 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 ### Integrations
 | Table | Purpose | Notes |
 |---|---|---|
-| `integrations` | Connections (provider, account, scopes, status) | Created by the server OAuth callback; members read metadata |
-| `integration_actions` | Actions enabled per connection with risk level & approval mode | `sensitive` actions can never be `allow` |
-| `integration_secrets` | **Encrypted** credentials | Only `nxf1.` AES-256-GCM envelopes accepted (ADR-014); `key_id` must match the envelope; RLS on, no policies, no client grants — service role only |
+| `integrations` | Connections (provider, account, scopes, status, `health_status`/`health_message`) | Created by the server OAuth callback; members read metadata; health and error text are secret-scanned |
+| `integration_actions` | Actions enabled per connection with risk level & approval mode | `sensitive` actions can never be `allow`; seeded with each action's declared default on connect. The executor takes risk from the connector code, never from this row |
+| `integration_secrets` | **Encrypted** credentials | Only `nxf1.` AES-256-GCM envelopes accepted (ADR-014); `key_id` must match the envelope; `refresh_lease_until` serializes token renewal; RLS on, no policies, no client grants — service role only |
+| `integration_oauth_states` | Pending OAuth authorizations (Phase 8) | SHA-256 of the state only; bound to organization, user, provider and optional connection (composite FK); `return_path` must stay under `/app`; expires within an hour; single use; service role only |
+| `integration_rate_limit_windows` | Shared provider rate-limit counters (Phase 8) | Per connection, bucket and fixed window; written only through `consume_integration_rate_limit`; service role only |
 
 ### Workflows
 | Table | Purpose | Notes |
@@ -95,7 +97,7 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 | `tasks` | Units of work (workflow node, chat, manual, API, schedule) | Pins `employee_version_id`; attempts bounded by `max_attempts` |
 | `task_dependencies` | Task DAG (M:N) | Same run only; cycles rejected by trigger |
 | `task_attempts` | Retry history | `attempt_number` unique per task |
-| `tool_executions` | Each tool call: redacted input, `input_sha256`, policy decision, status | Proposed action immutable after insert; `deny` ⇒ `skipped`; `require_approval` cannot run without an approved approval for the exact fingerprint |
+| `tool_executions` | Each tool call: redacted input, `input_sha256`, policy decision, status, `attempt_count`, `requested_by` | Proposed action immutable after insert; `deny` ⇒ `skipped`; `require_approval` cannot run without an approved approval for the exact fingerprint. `pending_input` (exact validated input until it runs) is not selectable by clients (column grants), can be cleared but not replaced, and is cleared automatically when the execution ends; `executing` ⇔ `lease_expires_at` set. `claim_tool_executions` (service role) leases approved executions and expired leases |
 | `execution_events` | Append-only event stream | Secret-scanned; updates rejected |
 
 ### Governance
@@ -147,7 +149,9 @@ To evolve a format: add a new branch (`when 2 then …`) in a new migration with
 | `private.sync_business_context_source` | Trigger: keep one knowledge source per indexed context item | Writes only the source of the changed item, in the item's organization; skips escalation contacts |
 | `public.get_invitation` | Lets an invitee see an invitation before joining (they can't read invitation rows) | Only by token (32 random bytes; malformed tokens return nothing); returns the workspace name, role, status, invited address and whether it matches the caller's confirmed email; `authenticated` only |
 
-The Supabase security advisor reports these six RPCs (WARN, *authenticated can execute SECURITY DEFINER*) and two tables with RLS but no policies (INFO, `integration_secrets`, `provider_webhook_events`). Both are intentional and covered by tests.
+Phase 8's `consume_integration_rate_limit` and `claim_tool_executions` are SECURITY INVOKER and executable only by `service_role`.
+
+The Supabase security advisor reports these RPCs (WARN, *authenticated can execute SECURITY DEFINER*; five while `knowledge_pipeline` is unapplied) and four tables with RLS but no policies (INFO, `integration_secrets`, `integration_oauth_states`, `integration_rate_limit_windows`, `provider_webhook_events`). Both are intentional and covered by tests.
 
 ## 7. Migrations
 
@@ -167,6 +171,7 @@ The Supabase security advisor reports these six RPCs (WARN, *authenticated can e
 | 20261017221856 | foreign_key_indexes | indexes for tenant FKs without a leading index |
 | 20261018102320 | invitation_lookup | `get_invitation()`; `create_invitation()` expires a lapsed invitation before re-inviting and reports a live one |
 | 20261018145032 | business_context | `company_settings` JSON schema, `business_context_items` (Phase 7) |
+| 20261018154440 | integration_framework | OAuth states, refresh lease, rate-limit windows + `consume_integration_rate_limit`, connection health, tool-execution pending input/attempts/lease + `claim_tool_executions`, pending-input column grants (Phase 8) |
 | (pending) | knowledge_pipeline | `knowledge` bucket + storage policies, source processing columns, business context sources + sync trigger, chunk `search_vector`, `search_knowledge`, `claim_knowledge_sources`, `reprocess_knowledge_source` (Phase 7) |
 
 ## 8. Known gaps (by design, revisit later)

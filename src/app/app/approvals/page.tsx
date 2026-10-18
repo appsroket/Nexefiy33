@@ -1,5 +1,6 @@
 import { ClipboardCheck, SearchX } from 'lucide-react'
 import type { Metadata } from 'next'
+import Link from 'next/link'
 
 import { DataTable, type DataTableColumn } from '@/components/data-table'
 import { DateTime } from '@/components/date-time'
@@ -22,7 +23,15 @@ export const metadata: Metadata = { title: 'Approvals' }
 const PATH = '/app/approvals'
 
 const COLUMNS: DataTableColumn<ApprovalListItem>[] = [
-  { id: 'action', header: 'Request', cell: (row) => <span className="line-clamp-2 min-w-48">{row.actionSummary}</span> },
+  {
+    id: 'action',
+    header: 'Request',
+    cell: (row) => (
+      <Link href={`${PATH}/${row.id}`} className="line-clamp-2 min-w-48 underline-offset-4 hover:underline">
+        {row.actionSummary}
+      </Link>
+    ),
+  },
   { id: 'status', header: 'Status', cell: (row) => <StatusBadge kind="approval" status={row.status} /> },
   {
     id: 'required_role',
@@ -39,7 +48,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   const header = (
     <PageHeader
       title={item.title}
-      description={`${item.description} Approving and rejecting from this page isn’t available yet; for now you can review what’s waiting.`}
+      description={`${item.description} Open a request to see exactly what will be sent, then approve or reject it.`}
     />
   )
 

@@ -63,6 +63,13 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - **Organization boundaries:** knowledge tables use RLS and composite keys; `search_knowledge` filters by the requested organization even for the service role; files live in a private bucket under `<organization_id>/`, with storage policies per folder; the worker re-checks that a path belongs to the organization before downloading; every service-role query filters by `organization_id`.
 - **Configured business context** (profile, procedures, templates, escalation contacts) is written by authorized members and is more trustworthy than documents, but it is still context: it never grants permissions. Escalation contacts and templates are admin-only because they direct where information goes and what is said externally.
 
+### 5.3 Integrations (implemented in Phase 8, ADR-023)
+- **Credentials:** OAuth tokens are encrypted with `encryptCredential()` bound to organization + connection + purpose and stored only in `integration_secrets` (service role). They are decrypted in memory for a single provider call and never reach the browser, logs, execution records, audit metadata or models. OAuth state is random, stored only as a SHA-256, single use, bound to the user and organization, and expires in 10 minutes; the callback re-checks the user's admin role. Disconnecting revokes at the provider, deletes the credentials and cancels pending actions.
+- **Every action is checked on the server** in one executor: role (operator+ to request, admin to connect/configure), Zod input schema, connection owned by the verified organization, provider match, granted scopes, enabled setting, policy decision (strictest of connection setting, declared requirement and organization policies). The organization comes from the session or task, never from the request body or a model.
+- **External writes need approval by default.** Approvers see the exact input; the approval binds to its fingerprint; the exact input is hidden from clients and immutable; running re-checks connection, scopes, setting and fingerprint. Approvals for external writes need an admin.
+- **No duplicate side effects:** idempotency keys per request; non-idempotent actions are never resent once they may have reached the provider (`outcome_unknown` instead).
+- **Untrusted output:** provider error text is redacted and length-capped before it is stored or shown; Slack text is escaped so content can't trigger mentions or disguised links; HubSpot note bodies are HTML-escaped.
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).

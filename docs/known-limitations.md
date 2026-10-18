@@ -2,6 +2,26 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 8 (2026-10-18)
+
+### Implemented and verified
+- **Database:** migration `20261018154440_integration_framework` (OAuth states, refresh lease, rate-limit windows, connection health, tool-execution pending input/attempts/lease, `consume_integration_rate_limit`, `claim_tool_executions`) was applied to the development project through the Supabase MCP connector; the local file is byte-identical (MD5) to the recorded statement. Live checks: RLS on both new tables, no client privileges on them, `pending_input` not selectable by `authenticated`, both RPCs service-role only, the `authenticated` RPC list unchanged. **pgTAP `007_integration_framework`: 34/34** in one rolled-back transaction (the database held no test data afterwards). Security advisor: only "RLS enabled, no policy" on the two service-only tables (intentional, like `integration_secrets`). Hand-written types match the live columns.
+- **Application:** the connector framework, HubSpot and Slack connectors, OAuth connect/callback, encrypted token storage and leased renewal, health checks, disconnect with provider revocation, the executor (roles, schemas, scopes, policies, payload-bound approvals, idempotency, retries, rate limits), approve/reject from Approvals, integration pages and test console, `/api/cron/integrations`. Vitest: 103 new tests (474 total). `tsc`, ESLint, `next build` and the bundle secret scan pass.
+
+### Not verified yet
+- **No live HubSpot or Slack call has been made.** This development container's network policy refuses `api.hubapi.com` and `slack.com` (proxy 403), the provider documentation sites could only be checked through web search, and no HubSpot/Slack app credentials, encryption keyring or Supabase secret key are configured anywhere yet. Connector behaviour is covered by contract tests whose responses were written from the providers' documentation (labelled as such) — they are not proof that a live account accepts the requests. Least certain, per the docs checked: the HubSpot `2026-03` revoke request body and introspection response fields, and whether notes accept only the contacts scope. Run the checklist in [integration-architecture.md §7](integration-architecture.md#live-verification-checklist-controlled-environment) before calling either integration available; the website keeps both at `first_release`.
+- No signed-in browser check of the integration and approval pages (no real account has signed in yet; see Phase 6).
+- pgTAP 001–006 were not re-run in this phase (006 still needs `knowledge_pipeline`, which remains unapplied; see Phase 7).
+
+### Limitations
+- **Actors:** only signed-in members (operator and above) request actions, through the test console. AI employees and workflows will call the same executor once built; `employee_tool_permissions` is not consulted yet.
+- **Approvals:** an admin can approve an action they requested themselves (no separation of duties yet). Expired requests show as pending until someone opens them; `decide_approval` then marks them expired.
+- **Execution:** approved actions run from an after-response nudge or `/api/cron/integrations`; there is no Vercel cron schedule yet (`vercel.json` does not exist) and no durable engine. A non-idempotent action whose server stops mid-call ends as "outcome unknown" (never resent).
+- **Rate limits:** fixed windows allow short bursts at window edges; HubSpot is held at 100/10 s and 4 search requests/s, below the published 110/10 s and 5/s.
+- **Not built:** inbound webhooks and triggers (Slack events, HubSpot webhooks), Gmail/Calendar, outbound webhooks, deal actions, private Slack channels, credential re-encryption after key rotation.
+- Health checks and approved-action claims run across organizations from the cron route; each row is then handled with queries scoped to its own organization. `purgeOAuthStates` deletes expired states of every organization.
+- The performance advisor lists composite foreign keys without a full covering index across the schema (pre-existing pattern), including the two new tables; informational.
+
 ## As of Phase 7 (2026-10-18)
 
 ### Implemented and verified

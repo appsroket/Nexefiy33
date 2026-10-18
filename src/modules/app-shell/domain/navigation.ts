@@ -98,9 +98,9 @@ export const NAVIGATION: readonly NavSection[] = [
         title: 'Integrations',
         href: '/app/integrations',
         icon: 'integrations',
-        description: 'Connect the business apps your AI employees work in, such as email, calendar and CRM.',
-        availability: 'planned',
-        keywords: ['apps', 'connections', 'gmail', 'slack', 'hubspot'],
+        description: 'Connect the business apps your AI employees work in, such as your CRM and team chat.',
+        availability: 'available',
+        keywords: ['apps', 'connections', 'slack', 'hubspot', 'crm', 'oauth'],
       },
       {
         title: 'Analytics',

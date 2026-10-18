@@ -269,12 +269,13 @@ Dashboard: <https://api.slack.com/apps>
 | `SLACK_SIGNING_SECRET` | **server** — verifies every inbound Slack request |
 
 Steps:
-1. *Create New App* → From scratch (one app per environment).
-2. OAuth & Permissions → Redirect URLs: `{APP_URL}/api/integrations/slack/callback` (HTTPS only — use a tunnel locally).
-3. Planned bot token scopes: `chat:write`, `channels:read`, `channels:history`, `app_mentions:read` (add `groups:read`/`groups:history` only if private channels are needed).
-4. Event Subscriptions → Request URL `{APP_URL}/api/webhooks/slack`; subscribe to `app_mention` and `message.channels`.
-5. Basic Information → App Credentials: copy client id, client secret, signing secret.
-6. Enable distribution (Manage Distribution) before customers outside your workspace can install it.
+1. *Create New App* → From scratch (one app per environment; use a free development workspace for testing).
+2. OAuth & Permissions → Redirect URLs: `{APP_URL}/api/integrations/slack/callback` (HTTPS only: use the Vercel preview URL or a tunnel locally).
+3. OAuth & Permissions → **Bot Token Scopes**: `channels:read`, `chat:write` — exactly what the built actions use (`slack.channels.list`, `slack.messages.post`). No user scopes. (Reading channels and events — `channels:history`, `app_mentions:read` — arrive with Slack triggers.)
+4. Optional: *Token Rotation* (OAuth & Permissions → Advanced). Supported: the app renews expiring tokens before use and stores each new refresh token. Without rotation, bot tokens don't expire.
+5. Basic Information → App Credentials: copy client id, client secret and signing secret into `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET` (the signing secret is required by the feature check; it will verify inbound events once those are built).
+6. Enable distribution (Manage Distribution) before workspaces other than your own can install it. Apps distributed outside the Slack Marketplace get lower limits on `conversations.history`/`conversations.replies` (Slack changelog, 2025-05-29); the built actions don't use those methods.
+7. To post, the app must be a member of the channel: in Slack, `/invite @your-app` in that channel (otherwise the action fails with "not in channel").
 
 **Rotation:** Basic Information → *Regenerate* the client secret or signing secret → deploy immediately (the old value stops working on regeneration, so schedule a short window).
 
@@ -288,11 +289,13 @@ Developer portal: <https://developers.hubspot.com/>
 | `HUBSPOT_CLIENT_SECRET` | **server** — also verifies webhook signatures (v3) |
 
 Steps:
-1. Create a developer account and a **developer test account** for development data.
-2. Create a public app (one per environment) → Auth → Redirect URL `{APP_URL}/api/integrations/hubspot/callback`.
-3. Planned scopes: `oauth`, `crm.objects.contacts.read`, `crm.objects.contacts.write`, `crm.objects.deals.read`, `crm.objects.deals.write` (confirm the scope required for creating notes when the adapter is built).
-4. Webhooks → target URL `{APP_URL}/api/webhooks/hubspot`; subscribe to `contact.creation`.
-5. Copy client id and secret.
+1. Create a developer account and a **developer test account** (or a free HubSpot account) for development data.
+2. Create an app with OAuth authentication (one per environment). On the current developer platform this is a project app whose `app-hsmeta.json` has `auth.type: "oauth"`; legacy public apps also work. Set the redirect URL to `{APP_URL}/api/integrations/hubspot/callback` (HTTPS; `http://localhost` is allowed for testing).
+3. **Required scopes**: `oauth`, `crm.objects.contacts.read`, `crm.objects.contacts.write` — exactly what the built actions use (find contacts, create or update a contact, add a note to a contact; notes are written under the contacts scope). Add deal scopes only when deal actions are built.
+4. Copy the client id and secret into `HUBSPOT_CLIENT_ID` and `HUBSPOT_CLIENT_SECRET`.
+5. Webhooks (`contact.creation` → `{APP_URL}/api/webhooks/hubspot`) arrive with HubSpot triggers; not needed yet.
+
+The connector calls the date-versioned APIs checked on 2026-10-18: OAuth `…/oauth/2026-03/token` (plus `/introspect` and `/revoke`) and CRM `…/crm/objects/2026-09/…`. Versions are constants at the top of `src/modules/integrations/connectors/hubspot.ts`.
 
 **Rotation:** rotate the client secret in the app's Auth settings, deploy, and confirm webhook signature verification still passes.
 

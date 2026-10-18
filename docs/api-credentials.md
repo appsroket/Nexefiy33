@@ -15,10 +15,10 @@ Status: ✅ configured locally · ⬜ selected, not yet configured · ⏳ decisi
 | B3 | Voyage AI | API key (`voyage-4`, 1024 dims) | ⬜ selected (ADR-008) | server | knowledge | knowledge indexing and semantic search |
 | C1 | Resend | API key, sender address, verified domain | ⬜ selected (ADR-016) | server | app shell (invitation email) | invitation and notification email |
 | D1 | Stripe | Secret/restricted key, publishable key, webhook secret | ⬜ | server + public | billing | subscriptions, checkout, portal |
-| E1 | Nexefiy | Credential-encryption keyring | ⬜ | server | integrations | every OAuth integration |
+| E1 | Nexefiy | Credential-encryption keyring | ⬜ (code built, Phase 8) | server | integrations | every OAuth integration |
 | E2 | Google Cloud | OAuth client id/secret (Gmail, Calendar) | ⬜ selected | server | integrations | Gmail and Calendar connections |
-| E3 | Slack | Client id/secret, signing secret | ⬜ selected | server | integrations | Slack connections and events |
-| E4 | HubSpot | Public app client id/secret | ⬜ selected (CRM) | server | integrations | HubSpot connections |
+| E3 | Slack | Client id/secret, signing secret | ⬜ selected — connector built (Phase 8), not yet configured or live-tested | server | integrations | Slack connections and actions |
+| E4 | HubSpot | OAuth app client id/secret | ⬜ selected (CRM) — connector built (Phase 8), not yet configured or live-tested | server | integrations | HubSpot connections and actions |
 | E5 | Trigger.dev | Secret key, project ref | ⬜ selected (ADR-004) | server | durable execution | durable runs, waits, schedules |
 | E6 | Sentry | DSN | ⬜ optional | server | hardening | error reporting |
 | E7 | Nexefiy | `CRON_SECRET` | ⬜ | server | durable execution | cron routes (fail closed) |

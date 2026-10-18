@@ -1,5 +1,5 @@
-// Read-only access to approval requests, under RLS with the user's session.
-// Deciding requests (decide_approval RPC) arrives with the approvals feature.
+// Read access to approval requests, under RLS with the user's session.
+// Decisions go through approval-actions.ts (decide_approval RPC).
 
 import 'server-only'
 
@@ -55,5 +55,41 @@ export async function listApprovalRequests(
       createdAt: row.created_at,
       expiresAt: row.expires_at,
     })),
+  }
+}
+
+export interface ApprovalDetail extends ApprovalListItem {
+  proposedAction: Record<string, unknown>
+  payloadSha256: string
+  decidedAt: string | null
+  decisionNote: string | null
+  toolExecutionId: string
+}
+
+export async function getApprovalRequest(organizationId: string, id: string): Promise<ApprovalDetail | null> {
+  const supabase = await createUserClient()
+  const { data, error } = await supabase
+    .from('approval_requests')
+    .select('id, action_summary, status, required_role, created_at, expires_at, proposed_action, payload_sha256, decided_at, decision_note, tool_execution_id')
+    .eq('organization_id', organizationId)
+    .eq('id', id)
+    .maybeSingle()
+  if (error) {
+    console.error('[governance] failed to load an approval request', redact(error))
+    throw new ApprovalsUnavailableError('The approval request could not be loaded.')
+  }
+  if (!data) return null
+  return {
+    id: data.id,
+    actionSummary: data.action_summary,
+    status: data.status,
+    requiredRole: data.required_role,
+    createdAt: data.created_at,
+    expiresAt: data.expires_at,
+    proposedAction: (data.proposed_action ?? {}) as Record<string, unknown>,
+    payloadSha256: data.payload_sha256,
+    decidedAt: data.decided_at,
+    decisionNote: data.decision_note,
+    toolExecutionId: data.tool_execution_id,
   }
 }

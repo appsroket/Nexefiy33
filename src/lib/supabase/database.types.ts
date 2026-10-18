@@ -605,6 +605,92 @@ export type Database = {
           },
         ]
       }
+      integration_oauth_states: {
+        Row: {
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          integration_id: string | null
+          organization_id: string
+          provider: string
+          return_path: string
+          state_sha256: string
+          user_id: string
+        }
+        Insert: {
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          integration_id?: string | null
+          organization_id: string
+          provider: string
+          return_path?: string
+          state_sha256: string
+          user_id: string
+        }
+        Update: {
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          integration_id?: string | null
+          organization_id?: string
+          provider?: string
+          return_path?: string
+          state_sha256?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_oauth_states_integration_id_organization_id_fkey"
+            columns: ["integration_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "integrations"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "integration_oauth_states_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      integration_rate_limit_windows: {
+        Row: {
+          bucket: string
+          integration_id: string
+          organization_id: string
+          request_count: number
+          window_start: string
+        }
+        Insert: {
+          bucket: string
+          integration_id: string
+          organization_id: string
+          request_count?: number
+          window_start: string
+        }
+        Update: {
+          bucket?: string
+          integration_id?: string
+          organization_id?: string
+          request_count?: number
+          window_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_rate_limit_windows_integration_id_organization_id_fkey"
+            columns: ["integration_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "integrations"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
       integration_secrets: {
         Row: {
           access_token_expires_at: string | null
@@ -613,6 +699,7 @@ export type Database = {
           integration_id: string
           key_id: string
           organization_id: string
+          refresh_lease_until: string | null
           rotated_at: string | null
           secret_kind: string
           updated_at: string
@@ -624,6 +711,7 @@ export type Database = {
           integration_id: string
           key_id: string
           organization_id: string
+          refresh_lease_until?: string | null
           rotated_at?: string | null
           secret_kind: string
           updated_at?: string
@@ -635,6 +723,7 @@ export type Database = {
           integration_id?: string
           key_id?: string
           organization_id?: string
+          refresh_lease_until?: string | null
           rotated_at?: string | null
           secret_kind?: string
           updated_at?: string
@@ -658,6 +747,8 @@ export type Database = {
           external_account_id: string | null
           external_account_label: string | null
           granted_scopes: string[]
+          health_message: string | null
+          health_status: string
           id: string
           last_error: string | null
           last_health_check_at: string | null
@@ -676,6 +767,8 @@ export type Database = {
           external_account_id?: string | null
           external_account_label?: string | null
           granted_scopes?: string[]
+          health_message?: string | null
+          health_status?: string
           id?: string
           last_error?: string | null
           last_health_check_at?: string | null
@@ -694,6 +787,8 @@ export type Database = {
           external_account_id?: string | null
           external_account_label?: string | null
           granted_scopes?: string[]
+          health_message?: string | null
+          health_status?: string
           id?: string
           last_error?: string | null
           last_health_check_at?: string | null
@@ -1616,6 +1711,7 @@ export type Database = {
       }
       tool_executions: {
         Row: {
+          attempt_count: number
           created_at: string
           employee_id: string | null
           error: Json | null
@@ -1625,12 +1721,15 @@ export type Database = {
           input_redacted: Json
           input_sha256: string
           integration_id: string | null
+          lease_expires_at: string | null
           organization_id: string
           output_redacted: Json | null
           output_ref: string | null
+          pending_input: Json | null
           policy_decision: string
           policy_id: string | null
           policy_reason: string | null
+          requested_by: string | null
           risk_level: string
           started_at: string | null
           status: string
@@ -1640,6 +1739,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attempt_count?: number
           created_at?: string
           employee_id?: string | null
           error?: Json | null
@@ -1649,12 +1749,15 @@ export type Database = {
           input_redacted?: Json
           input_sha256: string
           integration_id?: string | null
+          lease_expires_at?: string | null
           organization_id: string
           output_redacted?: Json | null
           output_ref?: string | null
+          pending_input?: Json | null
           policy_decision: string
           policy_id?: string | null
           policy_reason?: string | null
+          requested_by?: string | null
           risk_level: string
           started_at?: string | null
           status?: string
@@ -1664,6 +1767,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attempt_count?: number
           created_at?: string
           employee_id?: string | null
           error?: Json | null
@@ -1673,12 +1777,15 @@ export type Database = {
           input_redacted?: Json
           input_sha256?: string
           integration_id?: string | null
+          lease_expires_at?: string | null
           organization_id?: string
           output_redacted?: Json | null
           output_ref?: string | null
+          pending_input?: Json | null
           policy_decision?: string
           policy_id?: string | null
           policy_reason?: string | null
+          requested_by?: string | null
           risk_level?: string
           started_at?: string | null
           status?: string
@@ -2098,6 +2205,28 @@ export type Database = {
           attempt: number
           organization_id: string
           source_id: string
+        }[]
+      }
+      claim_tool_executions: {
+        Args: { p_lease_seconds?: number; p_limit?: number }
+        Returns: {
+          attempt: number
+          organization_id: string
+          recovered: boolean
+          tool_execution_id: string
+        }[]
+      }
+      consume_integration_rate_limit: {
+        Args: {
+          p_bucket: string
+          p_integration_id: string
+          p_limit: number
+          p_organization_id: string
+          p_window_seconds: number
+        }
+        Returns: {
+          allowed: boolean
+          retry_after_ms: number
         }[]
       }
       create_invitation: {
