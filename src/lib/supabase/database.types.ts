@@ -235,6 +235,59 @@ export type Database = {
         }
         Relationships: []
       }
+      business_context_items: {
+        Row: {
+          attributes: Json
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          organization_id: string
+          position: number
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          attributes?: Json
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          organization_id: string
+          position?: number
+          status?: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          attributes?: Json
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          organization_id?: string
+          position?: number
+          status?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_context_items_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_settings: {
         Row: {
           brand_voice: string | null
@@ -672,6 +725,7 @@ export type Database = {
           id: string
           metadata: Json
           organization_id: string
+          search_vector: unknown
           source_id: string
           token_count: number | null
         }
@@ -685,6 +739,7 @@ export type Database = {
           id?: string
           metadata?: Json
           organization_id: string
+          search_vector?: never
           source_id: string
           token_count?: number | null
         }
@@ -698,6 +753,7 @@ export type Database = {
           id?: string
           metadata?: Json
           organization_id?: string
+          search_vector?: never
           source_id?: string
           token_count?: number | null
         }
@@ -716,6 +772,7 @@ export type Database = {
           byte_size: number | null
           chunk_count: number
           content_sha256: string | null
+          context_item_id: string | null
           created_at: string
           created_by: string | null
           embedding_model: string | null
@@ -726,7 +783,10 @@ export type Database = {
           metadata: Json
           mime_type: string | null
           name: string
+          next_attempt_at: string | null
           organization_id: string
+          processing_attempts: number
+          processing_started_at: string | null
           source_type: string
           source_url: string | null
           status: string
@@ -738,6 +798,7 @@ export type Database = {
           byte_size?: number | null
           chunk_count?: number
           content_sha256?: string | null
+          context_item_id?: string | null
           created_at?: string
           created_by?: string | null
           embedding_model?: string | null
@@ -748,7 +809,10 @@ export type Database = {
           metadata?: Json
           mime_type?: string | null
           name: string
+          next_attempt_at?: string | null
           organization_id: string
+          processing_attempts?: number
+          processing_started_at?: string | null
           source_type: string
           source_url?: string | null
           status?: string
@@ -760,6 +824,7 @@ export type Database = {
           byte_size?: number | null
           chunk_count?: number
           content_sha256?: string | null
+          context_item_id?: string | null
           created_at?: string
           created_by?: string | null
           embedding_model?: string | null
@@ -770,7 +835,10 @@ export type Database = {
           metadata?: Json
           mime_type?: string | null
           name?: string
+          next_attempt_at?: string | null
           organization_id?: string
+          processing_attempts?: number
+          processing_started_at?: string | null
           source_type?: string
           source_url?: string | null
           status?: string
@@ -779,6 +847,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "knowledge_sources_context_item_fk"
+            columns: ["context_item_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "business_context_items"
+            referencedColumns: ["id", "organization_id"]
+          },
           {
             foreignKeyName: "knowledge_sources_integration_fk"
             columns: ["integration_id", "organization_id"]
@@ -2012,6 +2087,19 @@ export type Database = {
     }
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string }
+      claim_knowledge_sources: {
+        Args: {
+          p_lease_seconds?: number
+          p_limit?: number
+          p_max_attempts?: number
+          p_organization_id?: string
+        }
+        Returns: {
+          attempt: number
+          organization_id: string
+          source_id: string
+        }[]
+      }
       create_invitation: {
         Args: {
           p_email: string
@@ -2108,6 +2196,31 @@ export type Database = {
           similarity: number
           source_id: string
           source_name: string
+        }[]
+      }
+      reprocess_knowledge_source: {
+        Args: { p_source_id: string }
+        Returns: string
+      }
+      search_knowledge: {
+        Args: {
+          p_match_count?: number
+          p_organization_id: string
+          p_query: string
+          p_query_embedding?: string
+          p_source_ids?: string[]
+        }
+        Returns: {
+          chunk_id: string
+          chunk_index: number
+          content: string
+          keyword_rank: number
+          metadata: Json
+          score: number
+          similarity: number
+          source_id: string
+          source_name: string
+          source_type: string
         }[]
       }
     }

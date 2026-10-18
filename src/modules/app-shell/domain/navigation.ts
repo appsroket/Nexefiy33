@@ -91,8 +91,8 @@ export const NAVIGATION: readonly NavSection[] = [
         href: '/app/knowledge',
         icon: 'knowledge',
         description: 'Documents and business details your AI employees use to answer accurately.',
-        availability: 'planned',
-        keywords: ['documents', 'files', 'company', 'context'],
+        availability: 'available',
+        keywords: ['documents', 'files', 'company', 'context', 'faq', 'procedures', 'templates', 'brand voice', 'hours'],
       },
       {
         title: 'Integrations',

@@ -2,6 +2,25 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 7 (2026-10-18)
+
+### Implemented and verified
+- **Database (partly):** migration `20261018145032_business_context` was applied to the development project through the Supabase MCP connector; the local file is byte-identical (MD5) to the recorded statement. Checked live with read-only queries: the company settings and per-kind attribute validators accept and reject the expected documents (18/18 checks), RLS is on with four policies, `anon` has no privileges, clients cannot update `kind`. Security advisor: no new findings. Generated types for `business_context_items` are identical to the hand-written ones.
+- **Application:** company profile, hours and brand voice; eight kinds of business context; document upload, processing status, retry, reprocessing and deletion; test search with citations and an evidence verdict. Vitest covers text extraction from real (runtime-built) PDF and Word files plus text, Markdown, CSV and HTML; chunking; the evidence verdict, citations and untrusted-content framing (including delimiter forgery); the processing worker against an in-memory database (ready, retries with backoff, permanent failures, lost leases, organization scoping of every query, refusal to read another organization's folder); the Voyage client contract (fake fetch); retrieval; and the Server Actions. `tsc`, ESLint, `next build` and the bundle secret scan pass.
+
+### Not verified yet
+- **Migration `knowledge_pipeline` is not applied.** The Supabase connector held it for the owner's confirmation (it contains `DROP CONSTRAINT` / `DROP POLICY` to widen a check constraint and replace three policies) and the prompt was cancelled. Until it is applied the storage bucket, the processing queue, business context indexing and `search_knowledge` do not exist in the development database, so uploads and search fail there. pgTAP `006_knowledge_and_business_context` (storage folder isolation, roles, the sync trigger, reprocessing, the queue, retrieval boundaries) and the updated `001` have **not run**: the connector also held every write in a rolled-back test transaction for confirmation.
+- No live Voyage AI call: the client is contract-tested with a fake fetch; the 0.45 similarity threshold is a starting value to calibrate with real documents.
+- No signed-in browser check of the knowledge pages (no real account has signed in yet; see Phase 6).
+
+### Limitations
+- Processing runs after the response (`after()`) and from `/api/cron/knowledge`; there is no Vercel cron schedule yet (`vercel.json` does not exist). Without `SUPABASE_SECRET_KEY`, sources stay queued. Durable execution (Trigger.dev) is a later phase.
+- Reprocessing a ready document takes it out of search until it is ready again. Two workers can only overlap after a 10-minute lease expires; the later one wins and the earlier one's final update is discarded.
+- Scanned PDFs (images) are not supported (no OCR). Legacy `.doc`, spreadsheets, slides, URLs and integration content are not supported yet. Keyword search uses English stemming.
+- Deleting a document deletes its row first and then its file; if the file removal fails the file stays in the organization's private folder (logged). Deleting a source directly through the Data API leaves its file behind.
+- Prompt-injection detection is a short list of patterns that flags passages for people and models; it is not a filter and will miss rephrased attacks. The real protection is that retrieved text never authorizes anything (CLAUDE.md rule 2).
+- Search is rate-limited to 30 per minute per user in memory per server instance.
+
 ## As of Phase 6 (2026-10-18)
 
 ### Implemented and verified

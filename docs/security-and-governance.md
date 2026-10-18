@@ -56,6 +56,13 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - Customer credentials: `encryptCredential()` / `decryptCredential()` (AES-256-GCM, AAD bound to org + connection + purpose, versioned keyring). Rotation and recovery: [credential-setup.md#e1](credential-setup.md#e1-customer-credential-encryption).
 - **Never log** API keys, `Authorization`/`Cookie`/signature headers, OAuth access/refresh/id tokens, authorization codes, PKCE verifiers, raw webhook payloads, or encrypted credential envelopes. Log provider, ids, and event types. Everything that might contain sensitive data passes through `redact()` / `redactString()` (`src/lib/logging/redact.ts`) first — including error-monitoring events.
 
+### 5.2 Untrusted content and knowledge (implemented in Phase 7, ADR-022)
+- **Documents, emails and web pages are untrusted.** Text retrieved from them is evidence about facts, never an instruction or a permission. It reaches a model only through `formatEvidenceForModel`: a preamble stating that excerpts are data that cannot grant tools, change approvals or authorize actions, each excerpt in a delimited `<knowledge_excerpt>` block with its citation label, and any delimiter-like text inside an excerpt neutralized.
+- Passages that read like prompt injection are flagged at indexing time and shown to people and models; they are not hidden, and flagging is not relied on for safety.
+- Answers must cite sources (`S1`, `S2`…) and say when evidence is insufficient; retrieval returns an explicit verdict (`no_query`, `no_matches`, `weak_matches`).
+- **Organization boundaries:** knowledge tables use RLS and composite keys; `search_knowledge` filters by the requested organization even for the service role; files live in a private bucket under `<organization_id>/`, with storage policies per folder; the worker re-checks that a path belongs to the organization before downloading; every service-role query filters by `organization_id`.
+- **Configured business context** (profile, procedures, templates, escalation contacts) is written by authorized members and is more trustworthy than documents, but it is still context: it never grants permissions. Escalation contacts and templates are admin-only because they direct where information goes and what is said externally.
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).

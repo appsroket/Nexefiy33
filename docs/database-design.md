@@ -1,6 +1,6 @@
 # Database Design
 
-Implemented schema (Phase 3). PostgreSQL 17 on Supabase project `rnqrqconfbcrmszllxgu`. Source of truth: `supabase/migrations/`. Generated types: `src/lib/supabase/database.types.ts`. Operations (apply, test, generate types): [supabase-setup.md](supabase-setup.md).
+Implemented schema (Phase 3; business context and knowledge pipeline added in Phase 7). PostgreSQL 17 on Supabase project `rnqrqconfbcrmszllxgu`. Source of truth: `supabase/migrations/`. Generated types: `src/lib/supabase/database.types.ts`. Operations (apply, test, generate types): [supabase-setup.md](supabase-setup.md).
 
 ## 1. Conventions
 
@@ -18,7 +18,7 @@ Implemented schema (Phase 3). PostgreSQL 17 on Supabase project `rnqrqconfbcrmsz
 
 | Schema | Contents | Exposed by Data API |
 |---|---|---|
-| `public` | Application tables (33) and 5 RPCs | yes, under RLS + explicit grants |
+| `public` | Application tables (34) and 9 RPCs | yes, under RLS + explicit grants |
 | `private` | Helper, validator, and trigger functions | no |
 | `extensions` | `pgcrypto`, `vector` 0.8, `pg_jsonschema` | no |
 | `vault` | Supabase Vault — not used for customer credentials (ADR-014) | no |
@@ -50,15 +50,20 @@ Anonymous users can read only the public plan catalog.
 | `organizations` | Tenants | Created only via `create_organization()` |
 | `organization_members` | User ↔ organization with role/status | PK `(organization_id, user_id)`; guarded by `private.guard_membership_change()` (role rules, last-owner rule, records `revoked_at/by`) |
 | `organization_invitations` | Pending invitations | Stores `token_hash` (SHA-256) only; one pending invite per email (a lapsed one is marked `expired` when the address is invited again); created via `create_invitation()`, looked up by the token holder via `get_invitation()`, accepted via `accept_invitation()` |
-| `company_settings` | Business profile per organization | One row per org; `settings` JSON secret-scanned |
+| `company_settings` | Company profile per organization | One row per org; `settings` JSON (profile, operating hours, brand voice) validated by `private.company_settings_is_valid` v1 and secret-scanned; admins update |
 
-### Business knowledge
+### Business context and knowledge (ADR-022)
 | Table | Purpose | Notes |
 |---|---|---|
-| `knowledge_sources` | Documents, URLs, text, integration content | Status `pending → processing → ready / failed / archived`; storage path must live under `<organization_id>/` |
-| `knowledge_chunks` | Content chunks + embeddings | `vector(1024)` from **Voyage `voyage-4`** (ADR-008); HNSW cosine index; `embedding_model` recorded per chunk; written by the ingestion pipeline (server) |
+| `business_context_items` | Products and services, target customers, goals and KPIs, departments, procedures, escalation contacts, communication templates, FAQs | `kind` + title, body, `attributes` validated per kind (`private.business_context_attributes_are_valid`); `kind` not updatable; operators manage, except `escalation_contact` and `template` (admins); status `active`/`archived`; audited |
+| `knowledge_sources` | Documents, URLs, text, integration content, business context | Status `pending → processing → ready / failed / archived`; processing lease (`processing_attempts`, `processing_started_at`) and retry time (`next_attempt_at`) written only by the server; storage path must live under `<organization_id>/` with no `.`/`..` segments; client-created files must be in the `knowledge` bucket; `business_context` sources (one per indexed item, `context_item_id`) are created, renamed, re-queued and archived only by the `sync_knowledge_source` trigger; audited |
+| `knowledge_chunks` | Content chunks + embeddings | Generated `search_vector` (English `tsvector`, GIN index) for keyword search; optional `vector(1024)` from **Voyage `voyage-4`** (ADR-008), HNSW cosine index, `embedding_model` per chunk; written by the processing worker (service role) |
 
-Retrieval: `match_knowledge_chunks(org, embedding, count, source_ids, min_similarity)` — `SECURITY INVOKER`, so RLS applies.
+Storage: private bucket `knowledge` (20 MB, PDF/DOCX/text/Markdown/CSV/HTML). Policies on `storage.objects`: members read, operators upload and delete, only under their organization's folder (`<organization_id>/…`).
+
+Retrieval: `search_knowledge(org, query, embedding?, count, source_ids?)` — hybrid keyword + vector search over `ready` sources, merged by reciprocal rank fusion; `SECURITY INVOKER` with an explicit organization filter, so RLS applies to members and the service role is still held to the organization it asks for. `match_knowledge_chunks` (vector only) remains.
+
+Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — service role only; leases due sources with `FOR UPDATE SKIP LOCKED`, reclaims expired leases, fails sources whose lease expired `max_attempts` times. `reprocess_knowledge_source(id)` — operators re-queue a `ready` or `failed` source of their organization.
 
 ### AI workforce
 | Table | Purpose | Notes |
@@ -117,12 +122,14 @@ Retrieval: `match_knowledge_chunks(org, embedding, count, source_ids, min_simila
 | `private.employee_config_is_valid(version, config)` | `employee_versions.config` | v1: `modelTier`, optional `model`, `channels`, required `limits` (turns, tool calls, cost), `outputStyle`, `knowledge` |
 | `private.workflow_graph_is_valid(version, graph)` | `workflow_versions.graph` | v1: `nodes` (`employee_task`, `tool_action`, `condition`, `approval`, `delay`), `edges`, `settings` + structural checks |
 | `private.policy_document_is_valid(version, policy)` | `organization_policies.policy` | v1: `rules[]` with `effect`, `toolKeys`, `riskLevels`, `employeeIds`, `conditions`; `defaults` |
+| `private.company_settings_is_valid(settings)` | `company_settings.settings` | v1 (`schemaVersion` 1 or absent): `profile`, `operatingHours.weekly` (up to 3 `open`/`close` ranges per weekday, 24-hour times), `brandVoice` |
+| `private.business_context_attributes_are_valid(kind, attributes)` | `business_context_items.attributes` | One schema per kind (e.g. templates require `channel`; escalation contacts require `email` or `phone`) |
 
 To evolve a format: add a new branch (`when 2 then …`) in a new migration with `create or replace function`, never change an existing branch.
 
 ## 6. Row Level Security
 
-- RLS is enabled on all 33 tables; every client-visible table has explicit per-command policies (`to authenticated`), and `anon` has no table privileges except the plan catalog.
+- RLS is enabled on all 34 tables; every client-visible table has explicit per-command policies (`to authenticated`), and `anon` has no table privileges except the plan catalog.
 - Policies use `organization_id in (select private.member_org_ids())` or `private.org_ids_with_min_role('<role>')` — evaluated once per statement, derived only from `auth.uid()`; a client-supplied organization id is never trusted.
 - Privileges are granted explicitly per table and per column after revoking Supabase defaults, so even a mistaken policy cannot let clients write columns such as `status`, `created_by`, or `organization_id` on update.
 
@@ -136,9 +143,11 @@ To evolve a format: add a new branch (`when 2 then …`) in a new migration with
 | `private.assign_employee_version`, `assign_workflow_version` | Number versions across all rows | Only read `max(version)` for the inserted row's parent |
 | `private.purge_audit_logs` | Retention | Service role only; refuses anything newer than 365 days |
 | `public.create_organization`, `create_invitation`, `accept_invitation`, `decide_approval` | Write rows clients cannot write directly | Derive the user from `auth.uid()`, check membership/role inside, `authenticated` only, generic errors for unknown ids/tokens |
+| `public.reprocess_knowledge_source` | Change `status` and processing columns clients cannot write | Only `ready`/`failed` sources in organizations where the caller is operator or above; generic error otherwise; `authenticated` only |
+| `private.sync_business_context_source` | Trigger: keep one knowledge source per indexed context item | Writes only the source of the changed item, in the item's organization; skips escalation contacts |
 | `public.get_invitation` | Lets an invitee see an invitation before joining (they can't read invitation rows) | Only by token (32 random bytes; malformed tokens return nothing); returns the workspace name, role, status, invited address and whether it matches the caller's confirmed email; `authenticated` only |
 
-The Supabase security advisor reports these five RPCs (WARN, *authenticated can execute SECURITY DEFINER*) and two tables with RLS but no policies (INFO, `integration_secrets`, `provider_webhook_events`). Both are intentional and covered by tests.
+The Supabase security advisor reports these six RPCs (WARN, *authenticated can execute SECURITY DEFINER*) and two tables with RLS but no policies (INFO, `integration_secrets`, `provider_webhook_events`). Both are intentional and covered by tests.
 
 ## 7. Migrations
 
@@ -157,6 +166,8 @@ The Supabase security advisor reports these five RPCs (WARN, *authenticated can 
 | 20261017221324 | version_numbering_definer | fix found by the tenant-isolation tests (see migration comment) |
 | 20261017221856 | foreign_key_indexes | indexes for tenant FKs without a leading index |
 | 20261018102320 | invitation_lookup | `get_invitation()`; `create_invitation()` expires a lapsed invitation before re-inviting and reports a live one |
+| 20261018145032 | business_context | `company_settings` JSON schema, `business_context_items` (Phase 7) |
+| (pending) | knowledge_pipeline | `knowledge` bucket + storage policies, source processing columns, business context sources + sync trigger, chunk `search_vector`, `search_knowledge`, `claim_knowledge_sources`, `reprocess_knowledge_source` (Phase 7) |
 
 ## 8. Known gaps (by design, revisit later)
 

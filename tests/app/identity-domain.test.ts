@@ -243,6 +243,12 @@ describe('browser bundle hygiene', () => {
     'src/modules/identity/domain/members.ts',
     'src/modules/identity/domain/onboarding.ts',
     'src/modules/identity/domain/workspace.ts',
+    'src/modules/knowledge/domain/business-context.ts',
+    'src/modules/knowledge/domain/chunking.ts',
+    'src/modules/knowledge/domain/company-profile.ts',
+    'src/modules/knowledge/domain/context-kinds.ts',
+    'src/modules/knowledge/domain/evidence.ts',
+    'src/modules/knowledge/domain/files.ts',
   ]
 
   it('keeps Zod out of modules that client components import', () => {

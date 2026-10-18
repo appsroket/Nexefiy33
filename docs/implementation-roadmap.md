@@ -12,7 +12,7 @@ P1 Foundation ✅
              └─ P6 Auth & organizations ✅
                  ├─ CI & end-to-end tests
                  (Knowledge, AI employees and Tools below all need sign-in)
-             ├─ Knowledge
+             ├─ P7 Knowledge ✅ (second migration pending)
              ├─ AI employees & model gateway ─────┐
              │    (needs Knowledge for retrieval)  │
              └─ Tools, policy & approvals ◄───────┘
@@ -37,13 +37,13 @@ Completed phases are numbered in the order the implementation prompts arrived. U
 | **4** | Application shell | Next.js 16 + Tailwind/shadcn, `@supabase/ssr` clients and session proxy, responsive navigation, workspace switcher, account and notification menus, reusable tables/forms/dialogs/filters/states, error boundaries, read-only approvals list, real overview counts | `tsc`, ESLint, `next build`, bundle secret scan, Vitest. Not verified end to end while signed in (no auth yet) |
 | **5** | Public website | Home, AI employees, use cases, integrations, security, pricing, getting started, contact (email delivery, feature-gated), sign-in/sign-up entry points, draft legal pages; built/planned status model; metadata, sitemap, robots; application moved to `/app` (ADR-020) | Vitest (links, honesty rules, metadata, contact handling), `next build`, bundle scan, browser check at 375 px and desktop |
 | **6** | Auth & organizations | Sign-up/sign-in, email confirmation and password reset (Supabase Auth, PKCE callback and token-hash routes), sign-out here/everywhere, proxy route protection, workspace creation/switching/settings, company details, members (roles, removal), invitations (email via Resend or a shareable link; resend, revoke, accept), leave/delete workspace, profile, onboarding checklist; migration `invitation_lookup` (ADR-021) | pgTAP 005 (59) plus 001–003 re-run against the dev project; Vitest 276; `tsc`, ESLint, `next build`, bundle scan; signed-out browser checks. **Not exercised live with real accounts** (see known-limitations) |
+| **7** | Knowledge & business context | Company profile, hours, brand voice; products, customers, goals/KPIs, departments, procedures, escalation contacts, templates, FAQs (`business_context_items`); private `knowledge` bucket with per-organization folders; upload of PDF/DOCX/text/Markdown/CSV/HTML; extraction, chunking, Postgres processing queue (leases, retries, reprocessing), optional Voyage embeddings, hybrid search with citations and an evidence verdict; untrusted-content framing (ADR-022); `/api/cron/knowledge` | Vitest 371, of which 95 new in `tests/knowledge` (extraction of real PDF/DOCX, chunking, evidence, worker, Voyage contract, retrieval, actions); `tsc`, ESLint, `next build`, bundle scan; migration `business_context` applied and checked live (validators, grants, advisors). **Pending:** `knowledge_pipeline` application, pgTAP 006 run, live Voyage call, signed-in browser check |
 
 ## Upcoming (in dependency order)
 
 | Phase | Goal | Key deliverables | Exit criteria | Prerequisites |
 |---|---|---|---|---|
 | **CI & end-to-end tests** | Every change checked automatically | GitHub Actions (typecheck, lint, Vitest, build, bundle scan, `supabase test db`), Playwright journeys for sign-up, invitations and two-workspace isolation against a test project | CI green on `main`; e2e journeys pass | Supabase CLI login + DB password as CI secrets, a test Supabase project or branch, test mailbox (or token-hash email templates) |
-| **Knowledge** | Business context | Business profile UI, storage bucket + policies, upload, parsing, chunking, Voyage embeddings, retrieval | Upload → retrieve cited chunks; cross-org storage access denied | `VOYAGE_API_KEY` |
 | **AI employees & model gateway** | Working employees | Templates, employee CRUD + versions UI, grants, `ModelGateway` + Anthropic adapter, chat (read-only tools) | Cited answer from Support employee; usage + cost recorded | `ANTHROPIC_API_KEY` |
 | **Tools, policy & approvals** | Supervised actions | Tool registry + executor, policy engine, approval inbox (`decide_approval`), kill switches, limits | Tool-executor security suite passes; rejection prevents execution | AI employees |
 | **Integrations** | Real connections | OAuth framework, encrypted credential storage, re-encryption job, Gmail/Calendar/Slack/HubSpot/webhook adapters, webhook ingestion, health | Each adapter: contract tests + recorded live sandbox verification | Provider developer apps + test accounts, encryption keyring |

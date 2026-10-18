@@ -102,7 +102,7 @@ npx supabase db push --linked
 
 Review the dry run first: it lists exactly which migrations will run.
 
-> Migrations 1–12 were applied on 2026-10-17 through the Supabase MCP connector (`apply_migration`), which records its own timestamp; the local files were renamed to those recorded versions, and their contents were verified byte-identical (MD5) to what the database recorded. `migration list` therefore shows them as in sync. Migration 13 (`20261018102320_invitation_lookup`) was applied the same way on 2026-10-18 and verified the same way.
+> Migrations 1–12 were applied on 2026-10-17 through the Supabase MCP connector (`apply_migration`), which records its own timestamp; the local files were renamed to those recorded versions, and their contents were verified byte-identical (MD5) to what the database recorded. `migration list` therefore shows them as in sync. Migration 13 (`20261018102320_invitation_lookup`) was applied the same way on 2026-10-18 and verified the same way. Migration 14 (`20261018145032_business_context`) was applied and verified the same way on 2026-10-18. Migration 15 (`knowledge_pipeline`, local file `20261018150000_knowledge_pipeline.sql`) is **not applied yet**: the connector asks the project owner to confirm statements containing `DROP`. After applying it, rename the local file to the version the database records (`npx supabase migration list --linked` or the MCP `list_migrations` tool), check the MD5, run pgTAP (`001`–`006`), check the advisors and regenerate types.
 
 ### Run the database security tests
 
