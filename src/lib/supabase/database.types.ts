@@ -47,6 +47,7 @@ export type Database = {
           current_version_id?: string | null
           description?: string | null
           id?: string
+          lifecycle_status?: string
           name: string
           organization_id: string
           role_category: string
@@ -65,6 +66,7 @@ export type Database = {
           current_version_id?: string | null
           description?: string | null
           id?: string
+          lifecycle_status?: string
           name?: string
           organization_id?: string
           role_category?: string
@@ -865,7 +867,7 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "integration_rate_limit_windows_integration_id_organization_id_fkey"
+            foreignKeyName: "integration_rate_limit_window_integration_id_organization__fkey"
             columns: ["integration_id", "organization_id"]
             isOneToOne: false
             referencedRelation: "integrations"
@@ -1016,7 +1018,7 @@ export type Database = {
           id?: string
           metadata?: Json
           organization_id: string
-          search_vector?: never
+          search_vector?: unknown
           source_id: string
           token_count?: number | null
         }
@@ -1030,7 +1032,7 @@ export type Database = {
           id?: string
           metadata?: Json
           organization_id?: string
-          search_vector?: never
+          search_vector?: unknown
           source_id?: string
           token_count?: number | null
         }
@@ -1191,7 +1193,7 @@ export type Database = {
           {
             foreignKeyName: "organization_governance_organization_id_fkey"
             columns: ["organization_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -1987,6 +1989,20 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "task_evidence_knowledge_source_id_organization_id_fkey"
+            columns: ["knowledge_source_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_sources"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "task_evidence_task_attempt_id_task_id_fkey"
+            columns: ["task_attempt_id", "task_id"]
+            isOneToOne: false
+            referencedRelation: "task_attempts"
+            referencedColumns: ["id", "task_id"]
+          },
+          {
             foreignKeyName: "task_evidence_task_id_organization_id_fkey"
             columns: ["task_id", "organization_id"]
             isOneToOne: false
@@ -1998,13 +2014,6 @@ export type Database = {
             columns: ["tool_execution_id", "organization_id"]
             isOneToOne: false
             referencedRelation: "tool_executions"
-            referencedColumns: ["id", "organization_id"]
-          },
-          {
-            foreignKeyName: "task_evidence_knowledge_source_id_organization_id_fkey"
-            columns: ["knowledge_source_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_sources"
             referencedColumns: ["id", "organization_id"]
           },
         ]
@@ -2369,12 +2378,18 @@ export type Database = {
       }
       workflow_definitions: {
         Row: {
+          activated_at: string | null
+          activated_by: string | null
           created_at: string
           created_by: string | null
           current_version_id: string | null
           description: string | null
+          draft_generation: Json | null
           draft_graph: Json
+          draft_layout: Json
           draft_schema_version: number
+          draft_source: string
+          draft_validation: Json | null
           id: string
           lock_version: number
           name: string
@@ -2382,20 +2397,20 @@ export type Database = {
           status: string
           updated_at: string
           updated_by: string | null
-          activated_at: string | null
-          activated_by: string | null
-          draft_generation: Json | null
-          draft_layout: Json
-          draft_source: string
-          draft_validation: Json | null
         }
         Insert: {
+          activated_at?: string | null
+          activated_by?: string | null
           created_at?: string
           created_by?: string | null
           current_version_id?: string | null
           description?: string | null
+          draft_generation?: Json | null
           draft_graph?: Json
+          draft_layout?: Json
           draft_schema_version?: number
+          draft_source?: string
+          draft_validation?: Json | null
           id?: string
           lock_version?: number
           name: string
@@ -2403,20 +2418,20 @@ export type Database = {
           status?: string
           updated_at?: string
           updated_by?: string | null
-          activated_at?: string | null
-          activated_by?: string | null
-          draft_generation?: Json | null
-          draft_layout?: Json
-          draft_source?: string
-          draft_validation?: Json | null
         }
         Update: {
+          activated_at?: string | null
+          activated_by?: string | null
           created_at?: string
           created_by?: string | null
           current_version_id?: string | null
           description?: string | null
+          draft_generation?: Json | null
           draft_graph?: Json
+          draft_layout?: Json
           draft_schema_version?: number
+          draft_source?: string
+          draft_validation?: Json | null
           id?: string
           lock_version?: number
           name?: string
@@ -2424,12 +2439,6 @@ export type Database = {
           status?: string
           updated_at?: string
           updated_by?: string | null
-          activated_at?: string | null
-          activated_by?: string | null
-          draft_generation?: Json | null
-          draft_layout?: Json
-          draft_source?: string
-          draft_validation?: Json | null
         }
         Relationships: [
           {
@@ -2528,91 +2537,91 @@ export type Database = {
       }
       workflow_runs: {
         Row: {
+          advance_requested_at: string | null
+          authorized_by: string | null
           cancel_requested_at: string | null
           created_at: string
           created_by: string | null
+          deadline_at: string | null
           engine_run_id: string | null
           error: Json | null
           finished_at: string | null
           id: string
           idempotency_key: string
           input: Json
+          lease_expires_at: string | null
+          lease_token: string | null
           organization_id: string
+          output: Json | null
           output_ref: string | null
           queued_at: string
           started_at: string | null
           status: string
+          summary: string | null
           trigger_id: string | null
           trigger_type: string
           updated_at: string
+          wake_at: string | null
           workflow_id: string
           workflow_version_id: string
-          advance_requested_at: string | null
-          authorized_by: string | null
-          deadline_at: string | null
-          lease_expires_at: string | null
-          lease_token: string | null
-          output: Json | null
-          summary: string | null
-          wake_at: string | null
         }
         Insert: {
+          advance_requested_at?: string | null
+          authorized_by?: string | null
           cancel_requested_at?: string | null
           created_at?: string
           created_by?: string | null
+          deadline_at?: string | null
           engine_run_id?: string | null
           error?: Json | null
           finished_at?: string | null
           id?: string
           idempotency_key: string
           input?: Json
+          lease_expires_at?: string | null
+          lease_token?: string | null
           organization_id: string
+          output?: Json | null
           output_ref?: string | null
           queued_at?: string
           started_at?: string | null
           status?: string
+          summary?: string | null
           trigger_id?: string | null
           trigger_type: string
           updated_at?: string
+          wake_at?: string | null
           workflow_id: string
           workflow_version_id: string
-          advance_requested_at?: string | null
-          authorized_by?: string | null
-          deadline_at?: string | null
-          lease_expires_at?: string | null
-          lease_token?: string | null
-          output?: Json | null
-          summary?: string | null
-          wake_at?: string | null
         }
         Update: {
+          advance_requested_at?: string | null
+          authorized_by?: string | null
           cancel_requested_at?: string | null
           created_at?: string
           created_by?: string | null
+          deadline_at?: string | null
           engine_run_id?: string | null
           error?: Json | null
           finished_at?: string | null
           id?: string
           idempotency_key?: string
           input?: Json
+          lease_expires_at?: string | null
+          lease_token?: string | null
           organization_id?: string
+          output?: Json | null
           output_ref?: string | null
           queued_at?: string
           started_at?: string | null
           status?: string
+          summary?: string | null
           trigger_id?: string | null
           trigger_type?: string
           updated_at?: string
+          wake_at?: string | null
           workflow_id?: string
           workflow_version_id?: string
-          advance_requested_at?: string | null
-          authorized_by?: string | null
-          deadline_at?: string | null
-          lease_expires_at?: string | null
-          lease_token?: string | null
-          output?: Json | null
-          summary?: string | null
-          wake_at?: string | null
         }
         Relationships: [
           {
@@ -2705,6 +2714,13 @@ export type Database = {
             referencedColumns: ["id", "organization_id"]
           },
           {
+            foreignKeyName: "workflow_triggers_version_fk"
+            columns: ["workflow_version_id", "workflow_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_versions"
+            referencedColumns: ["id", "workflow_id"]
+          },
+          {
             foreignKeyName: "workflow_triggers_workflow_id_organization_id_fkey"
             columns: ["workflow_id", "organization_id"]
             isOneToOne: false
@@ -2721,13 +2737,13 @@ export type Database = {
           graph_schema_version: number
           graph_sha256: string
           id: string
+          layout: Json
           organization_id: string
           published_by: string | null
           source: string
           validation_report: Json
           version: number
           workflow_id: string
-          layout: Json
         }
         Insert: {
           created_at?: string
@@ -2736,13 +2752,13 @@ export type Database = {
           graph_schema_version?: number
           graph_sha256: string
           id?: string
+          layout?: Json
           organization_id: string
           published_by?: string | null
           source?: string
           validation_report?: Json
           version: number
           workflow_id: string
-          layout?: Json
         }
         Update: {
           created_at?: string
@@ -2751,13 +2767,13 @@ export type Database = {
           graph_schema_version?: number
           graph_sha256?: string
           id?: string
+          layout?: Json
           organization_id?: string
           published_by?: string | null
           source?: string
           validation_report?: Json
           version?: number
           workflow_id?: string
-          layout?: Json
         }
         Relationships: [
           {
@@ -2774,6 +2790,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_invitation: { Args: { p_token: string }; Returns: string }
       analytics_action_metrics: {
         Args: { p_from: string; p_organization_id: string; p_to: string }
         Returns: {
@@ -2783,7 +2800,7 @@ export type Database = {
           actions_settled: number
           actions_succeeded: number
           actions_withdrawn: number
-          error_code: string | null
+          error_code: string
           grain: string
           key: string
         }[]
@@ -2800,7 +2817,10 @@ export type Database = {
           p_source: string
           p_to: string
         }
-        Returns: { item: Json; total: number }[]
+        Returns: {
+          item: Json
+          total: number
+        }[]
       }
       analytics_model_usage: {
         Args: { p_from: string; p_organization_id: string; p_to: string }
@@ -2838,21 +2858,21 @@ export type Database = {
         Args: { p_from: string; p_organization_id: string; p_to: string }
         Returns: {
           active_ms: number
-          active_p50_ms: number | null
+          active_p50_ms: number
           approvals_approved: number
           approvals_expired: number
           approvals_rejected: number
           approvals_requested: number
           cost_micros: number
-          duration_p50_ms: number | null
-          duration_p90_ms: number | null
+          duration_p50_ms: number
+          duration_p90_ms: number
           grain: string
           input_tokens: number
           key: string
           output_tokens: number
           person_controls: number
           recovery_attempted: number
-          response_p50_ms: number | null
+          response_p50_ms: number
           retries: number
           tasks_cancelled: number
           tasks_completed: number
@@ -2875,8 +2895,8 @@ export type Database = {
         Args: { p_from: string; p_organization_id: string; p_to: string }
         Returns: {
           cost_micros: number
-          duration_p50_ms: number | null
-          duration_p90_ms: number | null
+          duration_p50_ms: number
+          duration_p90_ms: number
           grain: string
           key: string
           runs_cancelled: number
@@ -2888,112 +2908,6 @@ export type Database = {
           runs_succeeded: number
           runs_with_failed_step: number
           steps_failed: number
-        }[]
-      }
-      complete_handed_off_task: {
-        Args: { p_note?: string; p_outcome: string; p_task_id: string }
-        Returns: string
-      }
-      emergency_stop_employee: {
-        Args: { p_employee_id: string; p_reason: string }
-        Returns: Json
-      }
-      hand_off_employee_task: {
-        Args: { p_assignee?: string; p_note?: string; p_task_id: string }
-        Returns: string
-      }
-      lift_emergency_stop: {
-        Args: { p_organization_id: string; p_resume_tasks?: boolean }
-        Returns: Json
-      }
-      publish_workflow_version: {
-        Args: {
-          p_actor: string
-          p_confirm_name: string
-          p_expected_lock_version: number
-          p_graph: Json
-          p_layout: Json
-          p_report: Json
-          p_schedule?: Json
-          p_workflow_id: string
-        }
-        Returns: Json
-      }
-      change_workflow_status: {
-        Args: { p_action: string; p_workflow_id: string }
-        Returns: string
-      }
-      purge_expired_task_data: { Args: { p_limit?: number }; Returns: Json }
-      revoke_employee_tool: {
-        Args: { p_employee_id: string; p_integration_id?: string; p_tool_key: string }
-        Returns: number
-      }
-      set_emergency_stop: {
-        Args: { p_organization_id: string; p_reason: string }
-        Returns: Json
-      }
-      set_retention_settings: {
-        Args: {
-          p_event_days: number
-          p_evidence_days: number
-          p_hold: boolean
-          p_organization_id: string
-          p_payload_days: number
-        }
-        Returns: undefined
-      }
-      start_workflow_run: {
-        Args: { p_idempotency_key: string; p_input: Json; p_workflow_id: string }
-        Returns: string
-      }
-      start_scheduled_workflow_run: {
-        Args: { p_fire_at: string; p_next_run_at: string; p_trigger_id: string }
-        Returns: string | null
-      }
-      cancel_workflow_run: { Args: { p_run_id: string }; Returns: string }
-      claim_workflow_runs: {
-        Args: { p_lease_seconds?: number; p_limit?: number; p_run_id?: string }
-        Returns: {
-          lease_token: string
-          organization_id: string
-          run_id: string
-        }[]
-      }
-      record_workflow_progress: {
-        Args: {
-          p_events?: Json
-          p_finish?: Json
-          p_lease_seconds?: number
-          p_lease_token: string
-          p_release?: boolean
-          p_run_id: string
-          p_status?: string
-          p_steps?: Json
-          p_wake_at?: string
-        }
-        Returns: boolean
-      }
-      accept_invitation: { Args: { p_token: string }; Returns: string }
-      change_employee_status: {
-        Args: {
-          p_action: string
-          p_confirm_name?: string
-          p_employee_id: string
-          p_version_id?: string
-        }
-        Returns: Json
-      }
-      claim_knowledge_sources: {
-        Args: {
-          p_lease_seconds?: number
-          p_limit?: number
-          p_max_attempts?: number
-          p_organization_id?: string
-        }
-        Returns: {
-          attempt: number
-          organization_id: string
-          source_id: string
         }[]
       }
       assign_employee_task: {
@@ -3009,6 +2923,20 @@ export type Database = {
         Returns: string
       }
       cancel_employee_task: { Args: { p_task_id: string }; Returns: string }
+      cancel_workflow_run: { Args: { p_run_id: string }; Returns: string }
+      change_employee_status: {
+        Args: {
+          p_action: string
+          p_confirm_name?: string
+          p_employee_id: string
+          p_version_id?: string
+        }
+        Returns: Json
+      }
+      change_workflow_status: {
+        Args: { p_action: string; p_workflow_id: string }
+        Returns: string
+      }
       claim_employee_tasks: {
         Args: { p_lease_seconds?: number; p_limit?: number; p_task_id?: string }
         Returns: {
@@ -3020,6 +2948,19 @@ export type Database = {
           task_id: string
         }[]
       }
+      claim_knowledge_sources: {
+        Args: {
+          p_lease_seconds?: number
+          p_limit?: number
+          p_max_attempts?: number
+          p_organization_id?: string
+        }
+        Returns: {
+          attempt: number
+          organization_id: string
+          source_id: string
+        }[]
+      }
       claim_tool_executions: {
         Args: { p_lease_seconds?: number; p_limit?: number }
         Returns: {
@@ -3029,23 +2970,18 @@ export type Database = {
           tool_execution_id: string
         }[]
       }
-      expire_overdue_approvals: { Args: { p_limit?: number }; Returns: number }
-      reply_to_employee_task: {
-        Args: { p_message: string; p_task_id: string }
+      claim_workflow_runs: {
+        Args: { p_lease_seconds?: number; p_limit?: number; p_run_id?: string }
+        Returns: {
+          lease_token: string
+          organization_id: string
+          run_id: string
+        }[]
+      }
+      complete_handed_off_task: {
+        Args: { p_note?: string; p_outcome: string; p_task_id: string }
         Returns: string
       }
-      pause_employee_task: { Args: { p_task_id: string }; Returns: string }
-      resume_employee_task: { Args: { p_task_id: string }; Returns: string }
-      retry_employee_task: { Args: { p_task_id: string }; Returns: string }
-      set_employee_task_priority: {
-        Args: { p_priority: number; p_task_id: string }
-        Returns: number
-      }
-      reassign_employee_task: {
-        Args: { p_employee_id: string; p_task_id: string }
-        Returns: string
-      }
-      time_out_overdue_tasks: { Args: { p_limit?: number }; Returns: number }
       consume_integration_rate_limit: {
         Args: {
           p_bucket: string
@@ -3140,16 +3076,21 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      emergency_stop_employee: {
+        Args: { p_employee_id: string; p_reason: string }
+        Returns: Json
+      }
       employee_test_summary: {
         Args: { p_employee_id: string }
         Returns: {
           failed_runs: number
-          last_run_at: string | null
+          last_run_at: string
           passed_runs: number
           test_status: string
           version_id: string
         }[]
       }
+      expire_overdue_approvals: { Args: { p_limit?: number }; Returns: number }
       get_invitation: {
         Args: { p_token: string }
         Returns: {
@@ -3162,6 +3103,14 @@ export type Database = {
           role: string
           status: string
         }[]
+      }
+      hand_off_employee_task: {
+        Args: { p_assignee?: string; p_note?: string; p_task_id: string }
+        Returns: string
+      }
+      lift_emergency_stop: {
+        Args: { p_organization_id: string; p_resume_tasks?: boolean }
+        Returns: Json
       }
       match_knowledge_chunks: {
         Args: {
@@ -3181,13 +3130,60 @@ export type Database = {
           source_name: string
         }[]
       }
+      pause_employee_task: { Args: { p_task_id: string }; Returns: string }
+      publish_workflow_version: {
+        Args: {
+          p_actor: string
+          p_confirm_name: string
+          p_expected_lock_version: number
+          p_graph: Json
+          p_layout: Json
+          p_report: Json
+          p_schedule?: Json
+          p_workflow_id: string
+        }
+        Returns: Json
+      }
+      purge_expired_task_data: { Args: { p_limit?: number }; Returns: Json }
+      reassign_employee_task: {
+        Args: { p_employee_id: string; p_task_id: string }
+        Returns: string
+      }
+      record_workflow_progress: {
+        Args: {
+          p_events?: Json
+          p_finish?: Json
+          p_lease_seconds?: number
+          p_lease_token: string
+          p_release?: boolean
+          p_run_id: string
+          p_status?: string
+          p_steps?: Json
+          p_wake_at?: string
+        }
+        Returns: boolean
+      }
+      reply_to_employee_task: {
+        Args: { p_message: string; p_task_id: string }
+        Returns: string
+      }
       reprocess_knowledge_source: {
         Args: { p_source_id: string }
         Returns: string
       }
+      resume_employee_task: { Args: { p_task_id: string }; Returns: string }
+      retry_employee_task: { Args: { p_task_id: string }; Returns: string }
       review_employee_test_run: {
         Args: { p_note?: string; p_run_id: string; p_verdict: string }
         Returns: string
+      }
+      revoke_employee_tool: {
+        Args: {
+          p_employee_id: string
+          p_integration_id?: string
+          p_tool_key: string
+        }
+        Returns: number
       }
       save_employee_version: {
         Args: {
@@ -3220,6 +3216,37 @@ export type Database = {
           source_type: string
         }[]
       }
+      set_emergency_stop: {
+        Args: { p_organization_id: string; p_reason: string }
+        Returns: Json
+      }
+      set_employee_task_priority: {
+        Args: { p_priority: number; p_task_id: string }
+        Returns: number
+      }
+      set_retention_settings: {
+        Args: {
+          p_event_days: number
+          p_evidence_days: number
+          p_hold: boolean
+          p_organization_id: string
+          p_payload_days: number
+        }
+        Returns: undefined
+      }
+      start_scheduled_workflow_run: {
+        Args: { p_fire_at: string; p_next_run_at: string; p_trigger_id: string }
+        Returns: string
+      }
+      start_workflow_run: {
+        Args: {
+          p_idempotency_key: string
+          p_input: Json
+          p_workflow_id: string
+        }
+        Returns: string
+      }
+      time_out_overdue_tasks: { Args: { p_limit?: number }; Returns: number }
     }
     Enums: {
       [_ in never]: never

@@ -136,7 +136,7 @@ describe('the policy editor schema', () => {
   })
 
   it('matches the database validator’s vocabulary', () => {
-    const sql = readFileSync('supabase/migrations/20261021090000_governance_controls.sql', 'utf8')
+    const sql = readFileSync('supabase/migrations/20261019202213_governance_controls.sql', 'utf8')
     for (const category of ACTION_CATEGORIES) expect(sql).toContain(`"${category}"`)
     for (const key of ['maxTaskRuntimeSeconds', 'maxCostUsdPerTask', 'employeeMonthlyUsd', 'organizationMonthlyUsd', 'blockedSourceIds', 'requireSelectedSources', 'allowlist', 'separateApprover']) {
       expect(sql).toContain(`"${key}"`)

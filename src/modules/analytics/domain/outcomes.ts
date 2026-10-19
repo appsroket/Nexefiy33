@@ -2,7 +2,7 @@
 //
 // An outcome is recorded only when an action of an AI employee or a workflow
 // *succeeded* at the provider and proves it (private.action_outcomes in
-// supabase/migrations/20261022090000_analytics.sql, mirrored by
+// supabase/migrations/20261019202348_analytics.sql, mirrored by
 // `outcomesForAction` below; a database test keeps the two in step). Each
 // record links to its tool execution and task, which are its evidence.
 // Outcomes that need data no connected app provides are listed as

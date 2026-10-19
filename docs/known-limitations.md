@@ -9,7 +9,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 - **Tests:** pgTAP 014 (34 checks); 3 database integration tests in `tests/integration/analytics.test.ts` (each metric from real runner/executor activity, every count and rate equal to its evidence, SQL/TypeScript outcome parity, admin-only usage, cross-workspace isolation); unit tests for the catalogue and calculations; pgTAP 001–014 (729) and 34 integration tests pass on local PostgreSQL 16; the dashboard rendered in Chromium with a layout fixture (no overflow at 390 px).
 
 ### Not verified yet
-- **Migration `analytics` is not applied to the dev project** (nor the seven before it). No dashboard has shown real workspace data: the pages were not opened signed in.
+- **Migration `analytics` was applied to the dev project on 2026-10-19** (with the seven before it); pgTAP 001–014 pass there (729/729). No dashboard has shown real workspace data: the pages were not opened signed in.
 
 ### Limitations
 - Appointments booked, tickets resolved, revenue and customer response time can't be measured (no calendar, help desk, deals or inbound channel integration). No hours-saved figure by design.
@@ -25,7 +25,8 @@ Honest list of what does not exist or is unverified. Update every phase.
 - **Tests:** pgTAP 013 (110 checks, every control called directly as each role, the service role and another workspace); 9 database integration tests in `tests/integration/governance.test.ts` (approval integrity, invalidation, authorized allow, revocation, workspace and employee stop, data access, workspace budget, handoff); unit tests for the policy engine, risk catalog, schemas and Server Actions; pgTAP 001–013 (695) and 31 integration tests pass on local PostgreSQL 16; the policy editor and stop dialog driven in Chromium with stubbed Server Actions.
 
 ### Not verified yet
-- **Migration `governance_controls` is not applied to the dev project** (nor the six before it). Nothing in this phase has run against Supabase, a live model, HubSpot or Slack.
+- **Migration `governance_controls` was applied to the dev project on 2026-10-19** (pgTAP 013 passes there).
+- **Retention guard gap (found 2026-10-19, not fixed).** `private.guard_tool_execution` and `private.guard_approval_request` compute "is the retention purge running" as `current_setting('nexefiy.retention_purge', true) = 'on'`, which is NULL (not false) when the setting was never set in the session. The payload check then evaluates to NULL and is skipped: server code (service role or the database owner) that sets `payload_purged_at` on a finished execution can replace `input_redacted` with arbitrary content, and a decided approval's `proposed_action` can be rewritten. Verified on the dev project in a rolled-back transaction. Clients have no write access to either table, so this is a defense-in-depth gap in audit-evidence integrity, not a tenant breach. Fix: a new migration using `coalesce(current_setting(...), '') = 'on'` (and allowing only the purged shape), plus a pgTAP test that runs without the setting. Nothing in this phase has run against Supabase, a live model, HubSpot or Slack.
 - The governance pages were not opened signed in; only the client components were rendered in a harness.
 
 ### Limitations
@@ -45,7 +46,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 
 ### Not verified yet
 - **No employee built from any template has run against a live model or a live HubSpot/Slack account.** "Ready to configure" means the capabilities exist and are tested in code, not that the template has done real work.
-- **Migration `employee_skills_catalog` is not applied to the dev project** (nor the five before it).
+- **Migration `employee_skills_catalog` was applied to the dev project on 2026-10-19** (pgTAP 012 passes there).
 - **Voice is designed, not built** (docs/voice-employees.md): Twilio Programmable Voice + ConversationRelay was selected from vendor documentation read through search excerpts; no account, number or call exists, and nothing about it has been verified by a call. The voice template can't be used.
 - No signed-in browser check of the new template gallery.
 
@@ -64,7 +65,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 - **Tests:** pgTAP 011 (graph schema v2, drafts, activation, status, runs and inputs, the lease, gates, cancellation, schedules, privileges) and 9 database integration tests in `tests/integration/workflows.test.ts` pass on local PostgreSQL 16; unit tests for references, conditions, transformations, schedules (time zones, daylight saving), validation, the run planner, normalization, templates, the rules drafter and generation (model mocked); the editor and run viewer were driven in headless Chromium against stubbed server actions (steps, connections, rename, add, undo/redo, save, step forms, JSON refusal, read-only statuses).
 
 ### Not verified yet
-- **Migration `workflow_builder` is not applied to the dev project** (nor the four before it); pgTAP 011 has run only locally.
+- **Migration `workflow_builder` was applied to the dev project on 2026-10-19** (pgTAP 011 passes there); pgTAP 011 has run only locally.
 - **No workflow has run with a live model, a live HubSpot/Slack account or on Trigger.dev.** Generation with the model is tested with a mocked gateway only; without `ANTHROPIC_API_KEY` the keyword rules draft (and say so).
 - No signed-in browser check of the workflow pages against a real deployment (the editor was checked in isolation).
 
@@ -85,7 +86,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 
 ### Not verified yet
 - **No Trigger.dev job has run.** Trigger.dev's API is blocked from the environment this was built in and no project exists; the jobs are unit-tested with the SDK mocked. Until a project is deployed (docs/credential-setup.md E5), tasks run after requests and from `/api/cron/tasks`, and the task page says so.
-- **Migrations `knowledge_pipeline`, `employee_builder`, `task_runtime` and `durable_execution` are still not applied to the dev project**, and pgTAP has not run there (only locally, on PostgreSQL 16 with a stand-in for Supabase's auth, storage and pg_jsonschema).
+- **Migrations `knowledge_pipeline`, `employee_builder`, `task_runtime` and `durable_execution` were applied to the dev project on 2026-10-19** and pgTAP 006–010 pass there (before that, pgTAP had run (only locally, on PostgreSQL 16 with a stand-in for Supabase's auth, storage and pg_jsonschema).
 - Still no live model call, no live HubSpot/Slack call, and no signed-in browser check of the Task Center.
 
 ### Limitations
@@ -117,7 +118,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 - **Application:** employee creation from a description (model drafting, or keyword rules when no model is configured) or a template; the editor with every configuration field; immutable versions and history; lifecycle controls (start testing, activate with typed confirmation, pause, resume, archive, restore, delete never-activated drafts); the test playground (free-form runs, test cases with automatic checks, reviewer verdicts, transcripts with every tool call and its decision); the shared runtime and its limits; the Anthropic gateway; templates limited to real tools. Vitest: 55 new tests (529 total) — domain rules, runtime limits, the test invoker, the Anthropic adapter (contract test with a fake SDK client, written from the Claude API reference), test runs against an in-memory database, and the Server Actions. `tsc`, ESLint, `next build` (with placeholder public variables) and the bundle secret scan pass.
 
 ### Not verified yet
-- **Migration `employee_builder` is not applied** to the development project: the Supabase connector asked for the owner's confirmation (the migration updates the built-in skills and its functions delete and re-create grants) and the prompt was cancelled, twice — once for a rolled-back dry run with pgTAP, once for the migration itself. Until it is applied, the employee pages fail against the dev database (new columns, tables and functions are missing). **pgTAP `008_employee_builder` (and the updated 001 RPC list and shared fixture) have not run.** The file is named `20261018190000`; rename it to the recorded version after applying.
+- **Migration `employee_builder` was applied on 2026-10-19** from the desktop session (earlier attempts failed): the Supabase connector asked for the owner's confirmation (the migration updates the built-in skills and its functions delete and re-create grants) and the prompt was cancelled, twice — once for a rolled-back dry run with pgTAP, once for the migration itself. Until it is applied, the employee pages fail against the dev database (new columns, tables and functions are missing). **pgTAP `008_employee_builder` (and the updated 001 RPC list and shared fixture) have not run.** The file is named `20261018190000`; rename it to the recorded version after applying.
 - **No model call has been made from this code.** No `ANTHROPIC_API_KEY` is configured anywhere, so model drafting and every playground run are untested against the real API (the playground refuses to run without a key; nothing is simulated). The request shape follows the Claude API reference checked on 2026-10-18.
 - No signed-in browser check of the employee pages (no real account has signed in yet; see Phase 6).
 - Prices in `src/modules/models/domain/catalog.ts` come from Anthropic's model pages and the Claude API reference (cached 2026-10-06); confirm them on the pricing page before relying on budgets.
@@ -157,7 +158,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 - **Application:** company profile, hours and brand voice; eight kinds of business context; document upload, processing status, retry, reprocessing and deletion; test search with citations and an evidence verdict. Vitest covers text extraction from real (runtime-built) PDF and Word files plus text, Markdown, CSV and HTML; chunking; the evidence verdict, citations and untrusted-content framing (including delimiter forgery); the processing worker against an in-memory database (ready, retries with backoff, permanent failures, lost leases, organization scoping of every query, refusal to read another organization's folder); the Voyage client contract (fake fetch); retrieval; and the Server Actions. `tsc`, ESLint, `next build` and the bundle secret scan pass.
 
 ### Not verified yet
-- **Migration `knowledge_pipeline` is not applied.** The Supabase connector held it for the owner's confirmation (it contains `DROP CONSTRAINT` / `DROP POLICY` to widen a check constraint and replace three policies) and the prompt was cancelled. Until it is applied the storage bucket, the processing queue, business context indexing and `search_knowledge` do not exist in the development database, so uploads and search fail there. pgTAP `006_knowledge_and_business_context` (storage folder isolation, roles, the sync trigger, reprocessing, the queue, retrieval boundaries) and the updated `001` have **not run**: the connector also held every write in a rolled-back test transaction for confirmation.
+- **Migration `knowledge_pipeline` was applied on 2026-10-19** (earlier attempts were cancelled).** The Supabase connector held it for the owner's confirmation (it contains `DROP CONSTRAINT` / `DROP POLICY` to widen a check constraint and replace three policies) and the prompt was cancelled. Until it is applied the storage bucket, the processing queue, business context indexing and `search_knowledge` do not exist in the development database, so uploads and search fail there. pgTAP `006_knowledge_and_business_context` (storage folder isolation, roles, the sync trigger, reprocessing, the queue, retrieval boundaries) and the updated `001` have **not run**: the connector also held every write in a rolled-back test transaction for confirmation.
 - No live Voyage AI call: the client is contract-tested with a fake fetch; the 0.45 similarity threshold is a starting value to calibrate with real documents.
 - No signed-in browser check of the knowledge pages (no real account has signed in yet; see Phase 6).
 

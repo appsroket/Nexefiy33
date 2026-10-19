@@ -16,7 +16,7 @@ import { outcomesForAction, OUTCOMES } from '@/modules/analytics/domain/outcomes
 import { exactPeriod, periodFromParams, resolvePeriod } from '@/modules/analytics/domain/period'
 import { findAction } from '@/modules/integrations/connectors/registry'
 
-const MIGRATION = readFileSync('supabase/migrations/20261022090000_analytics.sql', 'utf8')
+const MIGRATION = readFileSync('supabase/migrations/20261019202348_analytics.sql', 'utf8')
 
 /** The columns a facts function returns, read from the migration. */
 function factColumns(fn: string): Map<string, string> {

@@ -13,7 +13,7 @@
 // happened to them so far, so recent tasks may still be open. Actions are
 // counted by when they were requested, workflow runs by when they were
 // queued, outcomes by when they happened, model usage by when it was used.
-// The SQL functions in supabase/migrations/20261022090000_analytics.sql
+// The SQL functions in supabase/migrations/20261019202348_analytics.sql
 // compute the counts; `evidence` names the fact source and flag whose rows
 // make up each number (the evidence page lists exactly those rows).
 

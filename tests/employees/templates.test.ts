@@ -88,7 +88,7 @@ describe('skills', () => {
   })
 
   it('are seeded by the migration exactly as the catalog defines the available ones', () => {
-    const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261020090000_employee_skills_catalog.sql'), 'utf8')
+    const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261019201930_employee_skills_catalog.sql'), 'utf8')
     const str = "'((?:[^']|'')*)'"
     const row = new RegExp(`\\(null, ${str}, ${str}, ${str}, ${str},\\s*${str},\\s*'\\{([^}]*)\\}', 'active', null\\)`, 'g')
     const unquote = (value: string) => value.replace(/''/g, "'")
