@@ -53,7 +53,7 @@ function columnExpr(column: string): string {
 export class PgSupabase {
   private columns = new Map<string, Map<string, ColumnInfo>>()
   private keys = new Map<string, string[]>()
-  private functions = new Map<string, { returnsSet: boolean; composite: boolean }>()
+  private functions = new Map<string, { returnsSet: boolean; composite: boolean; jsonArgs: Set<string> }>()
 
   constructor(
     readonly pool: pg.Pool,
@@ -81,7 +81,9 @@ export class PgSupabase {
     const fn = await this.functionInfo(name)
     const params: unknown[] = []
     const named = Object.entries(args).map(([key, value]) => {
-      params.push(value !== null && typeof value === 'object' && !Array.isArray(value) ? JSON.stringify(value) : value)
+      // Like PostgREST: json/jsonb arguments are sent as JSON (arrays included); other arrays as SQL arrays.
+      const json = fn.jsonArgs.has(key)
+      params.push(value !== null && typeof value === 'object' && (json || !Array.isArray(value)) ? JSON.stringify(value) : value)
       return `${ident(key)} => $${params.length}`
     })
     const call = `public.${ident(name)}(${named.join(', ')})`
@@ -146,12 +148,19 @@ export class PgSupabase {
     let info = this.functions.get(name)
     if (!info) {
       const { rows } = await this.pool.query(
-        `select p.proretset, t.typtype from pg_proc p join pg_type t on t.oid = p.prorettype
+        `select p.proretset, t.typtype, p.proargnames, p.proargtypes::regtype[]::text[] as argtypes
+         from pg_proc p join pg_type t on t.oid = p.prorettype
          where p.proname = $1 and p.pronamespace = 'public'::regnamespace`,
         [name],
       )
       if (!rows[0]) throw new Error(`unknown function: ${name}`)
-      info = { returnsSet: rows[0].proretset as boolean, composite: rows[0].typtype === 'c' }
+      const names = (rows[0].proargnames ?? []) as string[]
+      const types = (rows[0].argtypes ?? []) as string[]
+      info = {
+        returnsSet: rows[0].proretset as boolean,
+        composite: rows[0].typtype === 'c',
+        jsonArgs: new Set(names.filter((_, index) => types[index] === 'jsonb' || types[index] === 'json')),
+      }
       this.functions.set(name, info)
     }
     return info

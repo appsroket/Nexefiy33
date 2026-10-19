@@ -17,6 +17,7 @@ import { createUserClient } from '@/lib/supabase/server'
 import { getVerifiedUser, SESSION_ENDED_MESSAGE } from '@/modules/identity/server/session'
 import { closeRejectedTask } from '@/modules/integrations/server/scheduling'
 import { scheduleTaskProcessing } from '@/modules/tasks/server/scheduling'
+import { scheduleWorkflowProcessing } from '@/modules/workflows/server/scheduling'
 
 const decisionSchema = z.object({
   requestId: z.uuid(),
@@ -59,6 +60,13 @@ export async function decideApproval(_previous: ActionState, formData: FormData)
   revalidatePath('/app/approvals')
   revalidatePath(`/app/approvals/${requestId}`)
 
+  if (data.kind === 'workflow_gate') {
+    // The decision settled the approval step; the run continues on the matching path.
+    scheduleWorkflowProcessing({ reason: 'approval', ...(data.workflow_run_id ? { runId: data.workflow_run_id } : {}) })
+    if (data.status === 'expired') return actionError('This approval step expired before it was decided; the workflow follows its rejected path.')
+    return actionSuccess(data.status === 'approved' ? 'Approved. The workflow continues.' : 'Rejected. The workflow follows its rejected path, or stops if it has none.')
+  }
+  if (data.workflow_run_id) scheduleWorkflowProcessing({ reason: 'approval', runId: data.workflow_run_id, approvedActions: data.status === 'approved' })
   if (data.status === 'expired') return actionError('This request expired before it was decided; the action was cancelled.')
   if (data.status === 'approved') {
     // Runs the action, then the employee task waiting on it (if any).

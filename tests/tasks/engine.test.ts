@@ -93,10 +93,40 @@ describe('the dispatcher', () => {
     ]
     const start = vi.fn(async () => void order.push('start'))
     const result = await dispatchDueTasks({ admin: db as never, integrations: null, start })
-    expect(result).toEqual({ approvalsExpired: 1, tasksTimedOut: 2, actionsRun: 'not_configured', started: 1 })
+    expect(result).toEqual({ approvalsExpired: 1, tasksTimedOut: 2, actionsRun: 'not_configured', schedulesFired: 0, runsAdvanced: 0, started: 1 })
     expect(start).toHaveBeenCalledWith([{ taskId: 'due', organizationId: ORG, version: 'v1' }])
     expect(order).toEqual(['expire', 'timeout', 'start'])
     expect(db.rpcCalls.map((call) => call.name)).not.toContain('claim_employee_tasks')
+  })
+})
+
+describe('the dispatcher and workflow runs', () => {
+  it('hands runs that need advancing to startRuns before starting due tasks; leased runs wait', async () => {
+    const db = new FakeSupabase()
+    const order: string[] = []
+    db.rpcHandlers.expire_overdue_approvals = () => ({ data: 0, error: null })
+    db.rpcHandlers.time_out_overdue_tasks = () => ({ data: 0, error: null })
+    db.tables.workflow_triggers = []
+    db.tables.workflow_runs = [
+      { id: 'woken', organization_id: ORG, status: 'waiting', lease_expires_at: null, advance_requested_at: '2026-10-19T05:00:00Z', wake_at: null, deadline_at: null, queued_at: '1', updated_at: 'v2' },
+      { id: 'held', organization_id: ORG, status: 'running', lease_expires_at: '2999-01-01T00:00:00Z', advance_requested_at: '2026-10-19T05:00:00Z', wake_at: null, deadline_at: null, queued_at: '2', updated_at: 'v1' },
+      { id: 'idle', organization_id: ORG, status: 'waiting', lease_expires_at: null, advance_requested_at: null, wake_at: null, deadline_at: null, queued_at: '3', updated_at: 'v1' },
+      { id: 'done', organization_id: ORG, status: 'succeeded', lease_expires_at: null, advance_requested_at: '2026-10-19T05:00:00Z', wake_at: null, deadline_at: null, queued_at: '4', updated_at: 'v1' },
+    ]
+    db.tables.tasks = [{ id: 'due', organization_id: ORG, employee_id: 'e', status: 'queued', scheduled_at: null, priority: 0, created_at: '1', updated_at: 'v1' }]
+    const startRuns = vi.fn(async () => void order.push('runs'))
+    const start = vi.fn(async () => void order.push('tasks'))
+    const result = await dispatchDueTasks({ admin: db as never, integrations: null, start, startRuns, now: () => new Date('2026-10-19T06:00:00Z') })
+    expect(startRuns).toHaveBeenCalledWith([{ runId: 'woken', organizationId: ORG, version: 'v2' }])
+    expect(order).toEqual(['runs', 'tasks'])
+    expect(result).toMatchObject({ runsAdvanced: 1, schedulesFired: 0, started: 1 })
+  })
+
+  it('starts one advance job per run, keyed by the run’s state', async () => {
+    await engine.startRunJobs([{ runId: 'r1', organizationId: ORG, version: 'v1' }])
+    expect(sdk.batchTrigger).toHaveBeenCalledWith('workflow-runs.advance', [
+      expect.objectContaining({ payload: { runId: 'r1', organizationId: ORG }, options: expect.objectContaining({ idempotencyKey: 'workflow-run:r1:v1', concurrencyKey: ORG }) }),
+    ])
   })
 })
 

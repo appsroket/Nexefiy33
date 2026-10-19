@@ -51,27 +51,26 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
       </div>
       <PageHeader title={request.actionSummary} actions={<StatusBadge kind="approval" status={request.status} />} />
 
-      <SectionCard title="What will happen" description="The exact action that runs if this is approved. It runs once, with this input, through the connection shown.">
-        <div className="flex flex-col gap-4">
+      {request.kind === 'workflow_gate' ? (
+        <SectionCard title="What you are approving" description="An approval step of a workflow run. You approve exactly this text; the run then continues on its approved path (or its rejected path if you reject).">
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
-            {typeof about.actionTitle === 'string' ? (
+            <dt className="text-muted-foreground">Workflow</dt>
+            <dd>
+              {typeof about.workflow === 'string' ? about.workflow : 'Workflow'}
+              {typeof about.version === 'number' ? ` (version ${about.version})` : ''}
+            </dd>
+            <dt className="text-muted-foreground">Step</dt>
+            <dd>{typeof about.step === 'string' ? about.step : '—'}</dd>
+            {request.workflowRunId ? (
               <>
-                <dt className="text-muted-foreground">Action</dt>
+                <dt className="text-muted-foreground">Run</dt>
                 <dd>
-                  {about.actionTitle} {typeof about.action === 'string' ? <code className="text-xs text-muted-foreground">({about.action})</code> : null}
+                  <Link href={`/app/workflows/runs/${request.workflowRunId}`} className="underline underline-offset-4">
+                    Open the run
+                  </Link>
                 </dd>
               </>
             ) : null}
-            {typeof about.connection === 'string' ? (
-              <>
-                <dt className="text-muted-foreground">Connection</dt>
-                <dd>{about.connection}</dd>
-              </>
-            ) : null}
-            <dt className="text-muted-foreground">Requested</dt>
-            <dd>
-              <DateTime value={request.createdAt} />
-            </dd>
             <dt className="text-muted-foreground">Expires</dt>
             <dd>
               <DateTime value={request.expiresAt} />
@@ -79,12 +78,44 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
             <dt className="text-muted-foreground">Who can decide</dt>
             <dd>{roleLabel(required)} or above</dd>
           </dl>
-          <div className="flex flex-col gap-1">
-            <h3 className="text-sm font-medium">Input</h3>
-            <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{JSON.stringify(input ?? request.proposedAction, null, 2)}</pre>
+          <pre className="mt-3 max-h-96 overflow-auto rounded-md bg-muted p-3 text-sm whitespace-pre-wrap">{typeof about.message === 'string' ? about.message : ''}</pre>
+        </SectionCard>
+      ) : (
+        <SectionCard title="What will happen" description="The exact action that runs if this is approved. It runs once, with this input, through the connection shown.">
+          <div className="flex flex-col gap-4">
+            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+              {typeof about.actionTitle === 'string' ? (
+                <>
+                  <dt className="text-muted-foreground">Action</dt>
+                  <dd>
+                    {about.actionTitle} {typeof about.action === 'string' ? <code className="text-xs text-muted-foreground">({about.action})</code> : null}
+                  </dd>
+                </>
+              ) : null}
+              {typeof about.connection === 'string' ? (
+                <>
+                  <dt className="text-muted-foreground">Connection</dt>
+                  <dd>{about.connection}</dd>
+                </>
+              ) : null}
+              <dt className="text-muted-foreground">Requested</dt>
+              <dd>
+                <DateTime value={request.createdAt} />
+              </dd>
+              <dt className="text-muted-foreground">Expires</dt>
+              <dd>
+                <DateTime value={request.expiresAt} />
+              </dd>
+              <dt className="text-muted-foreground">Who can decide</dt>
+              <dd>{roleLabel(required)} or above</dd>
+            </dl>
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-medium">Input</h3>
+              <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{JSON.stringify(input ?? request.proposedAction, null, 2)}</pre>
+            </div>
           </div>
-        </div>
-      </SectionCard>
+        </SectionCard>
+      )}
 
       <SectionCard title="Decision">
         {pending ? (

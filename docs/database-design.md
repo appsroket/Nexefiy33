@@ -30,7 +30,8 @@ Roles: `owner` > `admin` > `operator` > `viewer` (`private.role_rank`). Membersh
 | Capability | viewer | operator | admin | owner | server (service role) |
 |---|---|---|---|---|---|
 | Read organization data (employees, knowledge, workflows, runs, tasks, approvals, outcomes) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manage employees, versions, skills, knowledge sources, workflow drafts & triggers | | ✓ | ✓ | ✓ | ✓ |
+| Manage employees, versions, skills, knowledge sources, workflow drafts; start, cancel and pause workflow runs/workflows | | ✓ | ✓ | ✓ | ✓ |
+| Activate workflow versions (server validates, then `publish_workflow_version`), resume, archive and restore workflows | | | ✓ | ✓ | ✓ |
 | Decide approvals (per `required_role`, default operator) | | ✓ | ✓ | ✓ | |
 | Grant tools to employees, manage integrations & actions, policies, company settings | | | ✓ | ✓ | ✓ |
 | Manage members & invitations (operators/viewers) | | | ✓ | ✓ | ✓ |
@@ -88,14 +89,15 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 ### Workflows
 | Table | Purpose | Notes |
 |---|---|---|
-| `workflow_definitions` | Editable metadata + draft graph | `lock_version` bumped on every update (optimistic locking) |
-| `workflow_versions` | Immutable published graphs | Graph validated against **workflow graph schema v1** + structural checks (unique node ids, edges reference nodes); `graph_sha256` computed by trigger; published by the server only |
-| `workflow_triggers` | manual / schedule / integration_event / webhook | Webhook triggers store only a secret hash |
+| `workflow_definitions` | Editable metadata + draft graph | `lock_version` bumped on every update (optimistic locking). Phase 12: `draft_layout` (positions, apart from the graph), `draft_source`, `draft_generation` (secret-scanned), `draft_validation`, `activated_at/_by`. Clients write only the draft columns (column grants); status and the current version change through `publish_workflow_version` (service role) and `change_workflow_status`; only never-activated drafts can be deleted |
+| `workflow_versions` | Immutable published graphs | Graph validated against **workflow graph schema v1 or v2** (v2: inputs, eight step types, branches, settings; unique ids, one trigger, at least one end, connections between existing steps, none into the trigger or out of an end, no cycles); `graph_sha256` computed by trigger; `layout`; `validation_report` (permissions, hand-offs); published by the server only |
+| `workflow_triggers` | manual / schedule / integration_event / webhook | Webhook triggers store only a secret hash. Phase 12: `workflow_version_id`; registered by activation only (clients can't write them); schedules started by `start_scheduled_workflow_run` |
 
 ### Execution
 | Table | Purpose | Notes |
 |---|---|---|
-| `workflow_runs` | Run of a pinned workflow version | Status lifecycle, `engine_run_id`, idempotency key |
+| `workflow_runs` | Run of a pinned workflow version | Status lifecycle, `engine_run_id`, idempotency key. Phase 12: `authorized_by` (the version's activator), `deadline_at`, the orchestrator's `lease_token`/`lease_expires_at` (claimed by `claim_workflow_runs`), `advance_requested_at` (set by the `wake_workflow_run` trigger when a step's task changes), `wake_at` (delays, retries), `summary`, `output`. Started by `start_workflow_run` (operators; inputs checked by `private.workflow_inputs_are_valid`), cancelled by `cancel_workflow_run` |
+| `workflow_run_steps` | One row per step a run reached or skipped | Phase 12. Status, branch taken, attempt, the step's task, due time, input/output (secret-scanned), error; written only through `record_workflow_progress` while holding the run's lease; a finished step never changes; members read |
 | `tasks` | Units of work (workflow node, chat, manual, API, schedule) | Pins `employee_version_id`; attempts bounded by `max_attempts`. Employee tasks (Phase 10): assigned through `assign_employee_task`, `lease_expires_at` set exactly while running (claimed by `claim_employee_tasks`), `cancel_requested_at`; title/instructions secret-scanned; re-queued by trigger when their last pending tool execution finishes. Phase 11: `paused` status with `paused_at`/`paused_from` (consistent by check) and `pause_requested_at`; `deadline_at`; operators control tasks through `cancel_`/`pause_`/`resume_`/`retry_employee_task`, `set_employee_task_priority`, `reassign_employee_task`; `time_out_overdue_tasks` (service role) fails overdue waiting tasks |
 | `task_dependencies` | Task DAG (M:N) | Same run only; cycles rejected by trigger. Phase 11: when a task succeeds its pending dependents whose dependencies all succeeded are queued; when it fails, is cancelled or skipped they are skipped (`dependency_not_met`), transitively (`settle_dependent_tasks` trigger) |
 | `task_attempts` | Tries at a task | `attempt_number` unique per task; usage (`model`, tokens, `cost_micros`, `turn_count`, `tool_call_count`, `active_ms`) and the runtime `checkpoint` (secret-scanned, ≤ 2 MB, **not selectable by clients**). Waiting continues an attempt; a failure or lost worker starts a new one |
@@ -107,7 +109,7 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 | Table | Purpose | Notes |
 |---|---|---|
 | `organization_policies` | Approval policy documents | **Policy schema v1**; `revision` bumped on change; default policy created with each organization |
-| `approval_requests` | Human decisions bound to an action | `payload_sha256` must equal the tool execution's `input_sha256`; records employee/workflow version and policy revision; proposed action immutable; decisions via `decide_approval()` only |
+| `approval_requests` | Human decisions bound to an action | `kind`: `tool_action` (`payload_sha256` must equal the tool execution's `input_sha256`) or `workflow_gate` (Phase 12: an approval step's task; the database sets `payload_sha256` to the SHA-256 of `proposed_action`, i.e. exactly what the approver sees; one per step). Records employee/workflow version and policy revision; proposed action immutable; decisions via `decide_approval()` only, which also settles a gate's task |
 | `audit_logs` | Append-only audit trail | Written by triggers on 16 tables (column names + allow-listed values only); no FKs so history outlives deleted rows; updates/deletes rejected except `private.purge_audit_logs()` (≥ 365 days, service role) |
 
 ### Billing and outcomes
@@ -125,7 +127,7 @@ Queue: `claim_knowledge_sources(limit, org?, lease_seconds, max_attempts)` — s
 | Validator | Used by | Versions |
 |---|---|---|
 | `private.employee_config_is_valid(version, config)` | `employee_versions.config` | v1: `modelTier`, optional `model`, `channels`, required `limits` (turns, tool calls, cost), `outputStyle`, `knowledge`. v2 (Phase 9, written by the builder): `profile`, `responsibilities`, `skills`, `tools` (key, connection, approval), `knowledge` (access, sources, passages), `model` (provider, tier, effort, max output tokens), `successCriteria`, `allowedActions`, `prohibitedActions`, `escalation`, `limits` (turns, tool calls, cost, runtime), `budget`; plus unique tools and non-empty selected sources |
-| `private.workflow_graph_is_valid(version, graph)` | `workflow_versions.graph` | v1: `nodes` (`employee_task`, `tool_action`, `condition`, `approval`, `delay`), `edges`, `settings` + structural checks |
+| `private.workflow_graph_is_valid(version, graph)` | `workflow_versions.graph` | v1: `nodes` (`employee_task`, `tool_action`, `condition`, `approval`, `delay`), `edges`, `settings` + structural checks. v2 (Phase 12): `inputs`, `nodes` (`trigger`, `employee_task`, `tool_action`, `condition`, `approval`, `transform`, `delay`, `end`), `edges` with `branch`, `settings`; one trigger, an end, no cycles. Step settings and references are validated by the server (ADR-027) |
 | `private.policy_document_is_valid(version, policy)` | `organization_policies.policy` | v1: `rules[]` with `effect`, `toolKeys`, `riskLevels`, `employeeIds`, `conditions`; `defaults` |
 | `private.company_settings_is_valid(settings)` | `company_settings.settings` | v1 (`schemaVersion` 1 or absent): `profile`, `operatingHours.weekly` (up to 3 `open`/`close` ranges per weekday, 24-hour times), `brandVoice` |
 | `private.business_context_attributes_are_valid(kind, attributes)` | `business_context_items.attributes` | One schema per kind (e.g. templates require `channel`; escalation contacts require `email` or `phone`) |
@@ -182,6 +184,7 @@ The Supabase security advisor reports these RPCs (WARN, *authenticated can execu
 | (pending) | employee_builder | employee lifecycle (`testing_started_at`, `active_version_id`, generated `lifecycle_status`), config schema v2, `employee_test_cases`, `employee_test_runs`, `create_employee`, `save_employee_version`, `change_employee_status`, `review_employee_test_run`, `employee_test_summary`, column grants, delete only unactivated drafts, skills catalog limited to real tools (Phase 9; written as `20261018190000`, rename to the recorded version when applied) |
 | (pending) | task_runtime | task leases and cancellation, attempt usage + checkpoint (column grants), `task_evidence`, `assign_employee_task`, `claim_employee_tasks`, `cancel_employee_task`, `reply_to_employee_task`, `expire_overdue_approvals`, re-queue trigger on tool executions (Phase 10; written as `20261018220000`, apply after the two below) |
 | (pending) | durable_execution | `paused` state, deadlines, pause/resume/retry/priority/reassign functions, dependency release/skip trigger, `claim_employee_tasks(p_task_id)`, cancellation that withdraws approvals mid-step, `time_out_overdue_tasks` (Phase 11; written as `20261018230000`, apply after `task_runtime`) |
+| (pending) | workflow_builder | graph schema v2, draft layout/source/validation, client column grants, delete only never-activated drafts, `workflow_run_steps`, run lease/wake/deadline/authority columns, `wake_workflow_run` trigger, `workflow_gate` approvals (fingerprint set by the database) with `decide_approval`/`expire_overdue_approvals` settling gates, `publish_workflow_version`, `change_workflow_status`, `start_workflow_run`, `start_scheduled_workflow_run`, `cancel_workflow_run`, `claim_workflow_runs`, `record_workflow_progress` (Phase 12; written as `20261019090000`, apply after `durable_execution`) |
 | (pending) | knowledge_pipeline | `knowledge` bucket + storage policies, source processing columns, business context sources + sync trigger, chunk `search_vector`, `search_knowledge`, `claim_knowledge_sources`, `reprocess_knowledge_source` (Phase 7) |
 
 ## 8. Known gaps (by design, revisit later)

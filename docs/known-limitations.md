@@ -2,6 +2,27 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 12 (2026-10-19)
+
+### Implemented and verified
+- **Workflow builder** (ADR-027): creation by description (AI model with one repair attempt, or labelled keyword rules without one), from a template, or blank; a React Flow canvas, step forms and a JSON view over one definition (graph schema v2: trigger, employee task, tool action, condition, approval, data transformation, delay, end; inputs; branches; retry; failure paths; completion criteria; run limits), undo/redo, optimistic locking; validation in the editor, on save and on the server; admin activation into immutable, fingerprinted versions (employee versions pinned, permissions recorded); version pages and restore-into-draft; pause, resume, archive, restore, delete of never-activated drafts.
+- **Controlled execution:** runs pin a version and its activator's authority; the orchestrator advances runs under a lease (sequential, conditional and parallel branches with joins, delays, tool-action retries for temporary failures, failure and rejected paths, run time and spend limits, cancellation that withdraws pending work and discloses completed actions); approval steps appear in the approvals inbox bound to the exact text shown; workflow tool actions go through the executor, which accepts only the action and connection the version names; employee steps run on the task runtime with required outputs; scheduled starts; a `workflow-runs.advance` Trigger.dev job; run pages with steps, approvals, actions, cost and history.
+- **Delegation only through workflows:** employees have no tool to create tasks or hand work to each other; hand-offs exist only as edges in an activated workflow and are checked against workspace policy (`workflow.handoff`).
+- **Tests:** pgTAP 011 (graph schema v2, drafts, activation, status, runs and inputs, the lease, gates, cancellation, schedules, privileges) and 9 database integration tests in `tests/integration/workflows.test.ts` pass on local PostgreSQL 16; unit tests for references, conditions, transformations, schedules (time zones, daylight saving), validation, the run planner, normalization, templates, the rules drafter and generation (model mocked); the editor and run viewer were driven in headless Chromium against stubbed server actions (steps, connections, rename, add, undo/redo, save, step forms, JSON refusal, read-only statuses).
+
+### Not verified yet
+- **Migration `workflow_builder` is not applied to the dev project** (nor the four before it); pgTAP 011 has run only locally.
+- **No workflow has run with a live model, a live HubSpot/Slack account or on Trigger.dev.** Generation with the model is tested with a mocked gateway only; without `ANTHROPIC_API_KEY` the keyword rules draft (and say so).
+- No signed-in browser check of the workflow pages against a real deployment (the editor was checked in isolation).
+
+### Limitations
+- Triggers: by hand and on a schedule only. Starting from an integration event (a new HubSpot contact, a Slack message) or a webhook isn't built (no inbound webhooks yet).
+- No loops, sub-workflows, dry runs, version diffs or natural-language edits of an existing draft.
+- An employee step's outputs are plain text; a tool action that waited for approval passes on the output the platform recorded (for searches and lists that is a redacted summary).
+- Scheduled runs need required inputs to be absent and run at most every 5 minutes; a schedule whose activator loses the admin role stops at its next run.
+- Pausing a workflow stops new runs only; runs already going continue (cancel them individually).
+- Approval steps notify nobody yet; approvers find them in the approvals inbox.
+
 ## As of Phase 11 (2026-10-19)
 
 ### Implemented and verified
@@ -17,7 +38,7 @@ Honest list of what does not exist or is unverified. Update every phase.
 ### Limitations
 - Pausing doesn't freeze approvals already pending: deciding one runs (or withdraws) that single action.
 - Reassignment is only possible before the first attempt (a checkpoint belongs to the employee that made it).
-- Workflow runs don't exist yet, so the workflow filter and the detail page's workflow section only show workflow tasks seeded directly; the queue and life cycle are ready for them.
+- (Phase 11) Workflow runs didn't exist yet; Phase 12 added them.
 - Escalations and approvals still notify nobody.
 
 ## As of Phase 10 (2026-10-18)

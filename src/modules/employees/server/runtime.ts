@@ -36,9 +36,10 @@ import {
   ESCALATE_INPUT_SCHEMA,
   ESCALATE_TOOL_NAME,
   escalateToolDescription,
-  FINISH_INPUT_SCHEMA,
   FINISH_TOOL_NAME,
+  finishInputSchema,
   finishToolDescription,
+  type RequiredOutput,
 } from '../domain/prompt'
 import type { TraceToolCall } from '../domain/test-checks'
 import type { EmployeeConfig, EmployeeToolGrant, RunOutcome } from '../domain/types'
@@ -156,6 +157,8 @@ export interface RunRequest {
   budgetRemainingMicros: number
   mode?: 'test' | 'live'
   checkpoint?: RunCheckpoint | null
+  /** Values the report must include (a workflow step's outputs). */
+  requiredOutputs?: readonly RequiredOutput[]
 }
 
 export interface RunDeps {
@@ -212,16 +215,30 @@ export function freshCheckpoint(input: string, model: string): RunCheckpoint {
   }
 }
 
-function parseReport(input: unknown): TaskReport | string {
-  const value = (input ?? {}) as { status?: unknown; summary?: unknown; receipts?: unknown }
+const MAX_OUTPUT_CHARS = 2000
+
+export function parseReport(input: unknown, requiredOutputs: readonly RequiredOutput[] = []): TaskReport | string {
+  const value = (input ?? {}) as { status?: unknown; summary?: unknown; receipts?: unknown; outputs?: unknown }
   if (typeof value.status !== 'string' || !(REPORT_STATUSES as readonly string[]).includes(value.status)) return 'status must be completed, partially_completed or not_completed'
   if (typeof value.summary !== 'string' || !value.summary.trim()) return 'summary is required'
   if (!Array.isArray(value.receipts) || value.receipts.some((receipt) => typeof receipt !== 'string')) return 'receipts must be a list of receipts'
-  return {
+  const report: TaskReport = {
     status: value.status as TaskReport['status'],
     summary: clip(scrubSecrets(value.summary.trim()), 4000),
     receipts: [...new Set((value.receipts as string[]).map((receipt) => receipt.trim()).filter(Boolean))].slice(0, 50),
   }
+  if (!requiredOutputs.length) return report
+  const given = value.outputs && typeof value.outputs === 'object' && !Array.isArray(value.outputs) ? (value.outputs as Record<string, unknown>) : {}
+  const outputs: Record<string, string> = {}
+  const missing: string[] = []
+  for (const { key } of requiredOutputs) {
+    const raw = given[key]
+    const text = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' || typeof raw === 'boolean' ? String(raw) : ''
+    if (text) outputs[key] = clip(scrubSecrets(text), MAX_OUTPUT_CHARS)
+    else missing.push(key)
+  }
+  if (missing.length && report.status === 'completed') return `outputs must include ${missing.join(', ')} (write “unknown” if you couldn’t find a value)`
+  return { ...report, outputs }
 }
 
 export async function runEmployee(request: RunRequest, deps: RunDeps): Promise<RunResult> {
@@ -251,7 +268,7 @@ export async function runEmployee(request: RunRequest, deps: RunDeps): Promise<R
       inputSchema: tool.kind === 'built_in' ? tool.tool.inputJsonSchema : tool.action.inputJsonSchema,
     })),
     { name: ESCALATE_TOOL_NAME, description: escalateToolDescription(config.escalation.behavior), inputSchema: { ...ESCALATE_INPUT_SCHEMA } },
-    { name: FINISH_TOOL_NAME, description: finishToolDescription(), inputSchema: structuredClone(FINISH_INPUT_SCHEMA) as unknown as Record<string, unknown> },
+    { name: FINISH_TOOL_NAME, description: finishToolDescription(request.requiredOutputs), inputSchema: finishInputSchema(request.requiredOutputs) },
   ]
   const system = buildSystemPrompt({
     employeeName: request.employeeName,
@@ -381,7 +398,7 @@ export async function runEmployee(request: RunRequest, deps: RunDeps): Promise<R
           call.result = { toolCallId: call.id, content: 'Not finished: an action from this step is waiting for approval. You will get its result first.', isError: true }
           continue
         }
-        const parsed = parseReport(call.input)
+        const parsed = parseReport(call.input, request.requiredOutputs)
         if (typeof parsed === 'string') {
           call.result = { toolCallId: call.id, content: `Invalid report: ${parsed}.`, isError: true }
           continue

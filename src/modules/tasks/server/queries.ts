@@ -237,7 +237,7 @@ export interface TaskAction {
 
 export interface TaskApproval {
   id: string
-  toolExecutionId: string
+  toolExecutionId: string | null
   summary: string
   status: string
   requiredRole: string

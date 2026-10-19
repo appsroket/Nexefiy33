@@ -269,6 +269,16 @@ describe('browser bundle hygiene', () => {
     'src/modules/tasks/domain/task-center.ts',
     'src/modules/tasks/domain/untrusted.ts',
     'src/modules/tasks/domain/verification.ts',
+    'src/modules/workflows/domain/execution.ts',
+    'src/modules/workflows/domain/factory.ts',
+    'src/modules/workflows/domain/graph.ts',
+    'src/modules/workflows/domain/logic.ts',
+    'src/modules/workflows/domain/references.ts',
+    'src/modules/workflows/domain/rule-drafter.ts',
+    'src/modules/workflows/domain/schedule.ts',
+    'src/modules/workflows/domain/types.ts',
+    'src/modules/workflows/domain/validation.ts',
+    'src/modules/workflows/ui/labels.ts',
   ]
 
   it('keeps Zod out of modules that client components import', () => {

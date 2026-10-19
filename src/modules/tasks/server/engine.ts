@@ -9,11 +9,14 @@ import { configure, tasks } from '@trigger.dev/sdk'
 
 import { isFeatureConfigured, requireFeature } from '@/lib/env/server'
 
+import type { DueRun } from '@/modules/workflows/server/dispatch'
+
 import type { DueTask } from './dispatch'
 
 export const ENGINE_JOBS = {
   dispatch: 'employee-tasks.dispatch',
   run: 'employee-tasks.run',
+  advanceRun: 'workflow-runs.advance',
 } as const
 
 export interface DispatchPayload {
@@ -22,6 +25,11 @@ export interface DispatchPayload {
 
 export interface RunTaskPayload {
   taskId: string
+  organizationId: string
+}
+
+export interface AdvanceRunPayload {
+  runId: string
   organizationId: string
 }
 
@@ -69,6 +77,27 @@ export async function startTaskJobs(due: readonly DueTask[]): Promise<void> {
         idempotencyKeyTTL: JOB_KEY_TTL,
         concurrencyKey: task.organizationId,
         tags: [`task:${task.taskId}`, `org:${task.organizationId}`],
+      },
+    })),
+  )
+}
+
+/**
+ * One job per workflow run that needs advancing, keyed by the run's state
+ * (updated_at) like task jobs; the job claims the run under a lease.
+ */
+export async function startRunJobs(due: readonly DueRun[]): Promise<void> {
+  if (!due.length) return
+  ensureConfigured()
+  await tasks.batchTrigger(
+    ENGINE_JOBS.advanceRun,
+    due.map((run) => ({
+      payload: { runId: run.runId, organizationId: run.organizationId } satisfies AdvanceRunPayload,
+      options: {
+        idempotencyKey: `workflow-run:${run.runId}:${run.version}`,
+        idempotencyKeyTTL: JOB_KEY_TTL,
+        concurrencyKey: run.organizationId,
+        tags: [`run:${run.runId}`, `org:${run.organizationId}`],
       },
     })),
   )

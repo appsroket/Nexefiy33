@@ -116,10 +116,11 @@ export type Database = {
           required_role: string
           status: string
           task_id: string
-          tool_execution_id: string
+          tool_execution_id: string | null
           updated_at: string
           workflow_run_id: string | null
           workflow_version_id: string | null
+          kind: string
         }
         Insert: {
           action_summary: string
@@ -139,10 +140,11 @@ export type Database = {
           required_role?: string
           status?: string
           task_id: string
-          tool_execution_id: string
+          tool_execution_id?: string | null
           updated_at?: string
           workflow_run_id?: string | null
           workflow_version_id?: string | null
+          kind?: string
         }
         Update: {
           action_summary?: string
@@ -162,10 +164,11 @@ export type Database = {
           required_role?: string
           status?: string
           task_id?: string
-          tool_execution_id?: string
+          tool_execution_id?: string | null
           updated_at?: string
           workflow_run_id?: string | null
           workflow_version_id?: string | null
+          kind?: string
         }
         Relationships: [
           {
@@ -2209,6 +2212,12 @@ export type Database = {
           status: string
           updated_at: string
           updated_by: string | null
+          activated_at: string | null
+          activated_by: string | null
+          draft_generation: Json | null
+          draft_layout: Json
+          draft_source: string
+          draft_validation: Json | null
         }
         Insert: {
           created_at?: string
@@ -2224,6 +2233,12 @@ export type Database = {
           status?: string
           updated_at?: string
           updated_by?: string | null
+          activated_at?: string | null
+          activated_by?: string | null
+          draft_generation?: Json | null
+          draft_layout?: Json
+          draft_source?: string
+          draft_validation?: Json | null
         }
         Update: {
           created_at?: string
@@ -2239,6 +2254,12 @@ export type Database = {
           status?: string
           updated_at?: string
           updated_by?: string | null
+          activated_at?: string | null
+          activated_by?: string | null
+          draft_generation?: Json | null
+          draft_layout?: Json
+          draft_source?: string
+          draft_validation?: Json | null
         }
         Relationships: [
           {
@@ -2254,6 +2275,84 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_run_steps: {
+        Row: {
+          attempt: number
+          branch: string | null
+          created_at: string
+          due_at: string | null
+          error: Json | null
+          finished_at: string | null
+          id: string
+          input: Json | null
+          label: string | null
+          node_id: string
+          node_type: string
+          organization_id: string
+          output: Json | null
+          run_id: string
+          started_at: string
+          status: string
+          task_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          attempt?: number
+          branch?: string | null
+          created_at?: string
+          due_at?: string | null
+          error?: Json | null
+          finished_at?: string | null
+          id?: string
+          input?: Json | null
+          label?: string | null
+          node_id: string
+          node_type: string
+          organization_id: string
+          output?: Json | null
+          run_id: string
+          started_at?: string
+          status: string
+          task_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attempt?: number
+          branch?: string | null
+          created_at?: string
+          due_at?: string | null
+          error?: Json | null
+          finished_at?: string | null
+          id?: string
+          input?: Json | null
+          label?: string | null
+          node_id?: string
+          node_type?: string
+          organization_id?: string
+          output?: Json | null
+          run_id?: string
+          started_at?: string
+          status?: string
+          task_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_run_steps_run_id_organization_id_fkey"
+            columns: ["run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "workflow_run_steps_task_id_organization_id_fkey"
+            columns: ["task_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id", "organization_id"]
           },
         ]
       }
@@ -2278,6 +2377,14 @@ export type Database = {
           updated_at: string
           workflow_id: string
           workflow_version_id: string
+          advance_requested_at: string | null
+          authorized_by: string | null
+          deadline_at: string | null
+          lease_expires_at: string | null
+          lease_token: string | null
+          output: Json | null
+          summary: string | null
+          wake_at: string | null
         }
         Insert: {
           cancel_requested_at?: string | null
@@ -2299,6 +2406,14 @@ export type Database = {
           updated_at?: string
           workflow_id: string
           workflow_version_id: string
+          advance_requested_at?: string | null
+          authorized_by?: string | null
+          deadline_at?: string | null
+          lease_expires_at?: string | null
+          lease_token?: string | null
+          output?: Json | null
+          summary?: string | null
+          wake_at?: string | null
         }
         Update: {
           cancel_requested_at?: string | null
@@ -2320,6 +2435,14 @@ export type Database = {
           updated_at?: string
           workflow_id?: string
           workflow_version_id?: string
+          advance_requested_at?: string | null
+          authorized_by?: string | null
+          deadline_at?: string | null
+          lease_expires_at?: string | null
+          lease_token?: string | null
+          output?: Json | null
+          summary?: string | null
+          wake_at?: string | null
         }
         Relationships: [
           {
@@ -2363,6 +2486,7 @@ export type Database = {
           updated_at: string
           webhook_secret_hash: string | null
           workflow_id: string
+          workflow_version_id: string | null
         }
         Insert: {
           config?: Json
@@ -2381,6 +2505,7 @@ export type Database = {
           updated_at?: string
           webhook_secret_hash?: string | null
           workflow_id: string
+          workflow_version_id?: string | null
         }
         Update: {
           config?: Json
@@ -2399,6 +2524,7 @@ export type Database = {
           updated_at?: string
           webhook_secret_hash?: string | null
           workflow_id?: string
+          workflow_version_id?: string | null
         }
         Relationships: [
           {
@@ -2431,6 +2557,7 @@ export type Database = {
           validation_report: Json
           version: number
           workflow_id: string
+          layout: Json
         }
         Insert: {
           created_at?: string
@@ -2445,6 +2572,7 @@ export type Database = {
           validation_report?: Json
           version: number
           workflow_id: string
+          layout?: Json
         }
         Update: {
           created_at?: string
@@ -2459,6 +2587,7 @@ export type Database = {
           validation_report?: Json
           version?: number
           workflow_id?: string
+          layout?: Json
         }
         Relationships: [
           {
@@ -2475,6 +2604,54 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      publish_workflow_version: {
+        Args: {
+          p_actor: string
+          p_confirm_name: string
+          p_expected_lock_version: number
+          p_graph: Json
+          p_layout: Json
+          p_report: Json
+          p_schedule?: Json
+          p_workflow_id: string
+        }
+        Returns: Json
+      }
+      change_workflow_status: {
+        Args: { p_action: string; p_workflow_id: string }
+        Returns: string
+      }
+      start_workflow_run: {
+        Args: { p_idempotency_key: string; p_input: Json; p_workflow_id: string }
+        Returns: string
+      }
+      start_scheduled_workflow_run: {
+        Args: { p_fire_at: string; p_next_run_at: string; p_trigger_id: string }
+        Returns: string | null
+      }
+      cancel_workflow_run: { Args: { p_run_id: string }; Returns: string }
+      claim_workflow_runs: {
+        Args: { p_lease_seconds?: number; p_limit?: number; p_run_id?: string }
+        Returns: {
+          lease_token: string
+          organization_id: string
+          run_id: string
+        }[]
+      }
+      record_workflow_progress: {
+        Args: {
+          p_events?: Json
+          p_finish?: Json
+          p_lease_seconds?: number
+          p_lease_token: string
+          p_release?: boolean
+          p_run_id: string
+          p_status?: string
+          p_steps?: Json
+          p_wake_at?: string
+        }
+        Returns: boolean
+      }
       accept_invitation: { Args: { p_token: string }; Returns: string }
       change_employee_status: {
         Args: {
@@ -2625,7 +2802,8 @@ export type Database = {
           required_role: string
           status: string
           task_id: string
-          tool_execution_id: string
+          tool_execution_id: string | null
+          kind: string
           updated_at: string
           workflow_run_id: string | null
           workflow_version_id: string | null

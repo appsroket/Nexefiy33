@@ -61,8 +61,8 @@ export const NAVIGATION: readonly NavSection[] = [
         title: 'Workflows',
         href: '/app/workflows',
         icon: 'workflows',
-        description: 'Combine steps and employees into a repeatable process.',
-        availability: 'planned',
+        description: 'Combine steps and employees into a repeatable, approved process.',
+        availability: 'available',
         keywords: ['automation', 'process', 'flows'],
       },
       {

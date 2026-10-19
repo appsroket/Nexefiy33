@@ -5,7 +5,9 @@
 //   1. sweep: expire overdue approvals (their actions are withdrawn and
 //      waiting tasks continue) and time out tasks past their deadline
 //   2. run approved actions (an approved action runs before its task resumes)
-//   3. find due tasks (queued, or running with an expired lease) and hand each
+//   3. workflows: start runs whose schedule is due, and hand runs that need
+//      advancing to `startRuns` (each advances as its own job)
+//   4. find due tasks (queued, or running with an expired lease) and hand each
 //      to `start`, which runs it as its own job
 //
 // Nothing is claimed here: the job claims its task (claim_employee_tasks with
@@ -20,6 +22,7 @@ import { redact } from '@/lib/logging/redact'
 import type { AdminClient } from '@/lib/supabase/admin'
 import { processApprovedExecutions } from '@/modules/integrations/server/executor'
 import type { IntegrationRuntime } from '@/modules/integrations/server/runtime'
+import { listDueRuns, startDueSchedules, type DueRun } from '@/modules/workflows/server/dispatch'
 
 export interface DueTask {
   taskId: string
@@ -32,6 +35,8 @@ export interface DispatchResult {
   approvalsExpired: number
   tasksTimedOut: number
   actionsRun: number | 'not_configured'
+  schedulesFired: number
+  runsAdvanced: number
   started: number
 }
 
@@ -68,6 +73,8 @@ export async function dispatchDueTasks(deps: {
   admin: AdminClient
   integrations: IntegrationRuntime | null
   start: (tasks: DueTask[]) => Promise<void>
+  /** Advances workflow runs (as jobs, or inline without an engine). */
+  startRuns?: (runs: DueRun[]) => Promise<void>
   now?: () => Date
 }): Promise<DispatchResult> {
   const now = deps.now ?? (() => new Date())
@@ -82,7 +89,20 @@ export async function dispatchDueTasks(deps: {
       actionsRun = 0
     }
   }
+  let schedulesFired = 0
+  let runsAdvanced = 0
+  if (deps.startRuns) {
+    try {
+      schedulesFired = await startDueSchedules(deps.admin, now())
+      const runs = await listDueRuns(deps.admin, now())
+      if (runs.length) await deps.startRuns(runs)
+      runsAdvanced = runs.length
+    } catch (error) {
+      // Runs keep their state; the next dispatch tries again.
+      console.error('[tasks] dispatching workflow runs failed', redact(error))
+    }
+  }
   const due = await listDueTasks(deps.admin, now())
   if (due.length) await deps.start(due)
-  return { ...swept, actionsRun, started: due.length }
+  return { ...swept, actionsRun, schedulesFired, runsAdvanced, started: due.length }
 }

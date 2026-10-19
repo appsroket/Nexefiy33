@@ -4,7 +4,7 @@
 // corrupt a task — the next dispatch recovers it from its checkpoint.
 //
 //   employee-tasks.sweep     every minute: dispatch (sweep, approved actions,
-//                            start due tasks)
+//                            due schedules and workflow runs, start due tasks)
 //   employee-tasks.dispatch  the same, on demand (an assignment, a decision,
 //                            a reply, a resume, a retry)
 //   employee-tasks.run       claims and runs one task until it finishes,
@@ -16,7 +16,7 @@
 import { logger, queue, schedules, task } from '@trigger.dev/sdk'
 
 import { dispatchDueTasks } from '@/modules/tasks/server/dispatch'
-import { ENGINE_JOBS, enqueueDispatch, startTaskJobs, type DispatchPayload, type RunTaskPayload } from '@/modules/tasks/server/engine'
+import { ENGINE_JOBS, enqueueDispatch, startRunJobs, startTaskJobs, type DispatchPayload, type RunTaskPayload } from '@/modules/tasks/server/engine'
 import { processEmployeeTasks } from '@/modules/tasks/server/runner'
 import { canRunTasks, getTaskRuntimeDeps } from '@/modules/tasks/server/runtime-deps'
 
@@ -29,7 +29,7 @@ async function dispatch(reason: string) {
     return { skipped: 'not_configured' as const }
   }
   const deps = getTaskRuntimeDeps()
-  const result = await dispatchDueTasks({ admin: deps.admin, integrations: deps.integrations, start: startTaskJobs })
+  const result = await dispatchDueTasks({ admin: deps.admin, integrations: deps.integrations, start: startTaskJobs, startRuns: startRunJobs })
   logger.info('Dispatched employee tasks', { reason, ...result })
   return result
 }

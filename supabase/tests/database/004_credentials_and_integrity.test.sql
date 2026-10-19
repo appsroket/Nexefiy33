@@ -179,10 +179,9 @@ select throws_ok(
   '23514', null, 'employee instructions reject credential-shaped values'
 );
 select throws_ok(
-  $$ insert into public.workflow_triggers (organization_id, workflow_id, trigger_type, config)
-     values ('a1000000-0000-4000-8000-000000000000', 'a5000000-0000-4000-8000-000000000001', 'manual',
-       '{"headers": {"Authorization": "Bearer x"}}') $$,
-  '23514', null, 'workflow trigger config rejects credentials'
+  $$ update public.workflow_definitions set draft_graph = '{"nodes": [], "edges": [], "headers": {"Authorization": "Bearer x"}}'
+     where id = 'a5000000-0000-4000-8000-000000000001' $$,
+  '23514', null, 'workflow drafts reject credentials (triggers are written only by activation, pgTAP 011)'
 );
 
 -- Versioned JSON schemas and valid statuses ------------------------------------------

@@ -155,7 +155,7 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
 
   const { data: task, error: taskError } = await admin
     .from('tasks')
-    .select('id, organization_id, employee_id, employee_version_id, title, instructions, max_attempts, created_by, cancel_requested_at, deadline_at')
+    .select('id, organization_id, employee_id, employee_version_id, title, instructions, input, max_attempts, created_by, cancel_requested_at, deadline_at')
     .eq('id', taskId)
     .eq('organization_id', organizationId)
     .maybeSingle()
@@ -252,6 +252,7 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
         budgetRemainingMicros: budgetMicros - spent,
         mode: 'live',
         checkpoint,
+        requiredOutputs: workflowOutputs(task.input),
       },
       {
         gateway: deps.gateway,
@@ -325,6 +326,16 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
 }
 
 type EventWriter = (eventType: string, level: 'info' | 'warn' | 'error', message: string, data?: Record<string, unknown>) => Promise<void>
+
+/** The values a workflow step asks its employee to report (tasks.input.workflow.outputs, written by the orchestrator). */
+function workflowOutputs(input: Json): { key: string; description: string }[] {
+  const outputs = (input as { workflow?: { outputs?: unknown } } | null)?.workflow?.outputs
+  if (!Array.isArray(outputs)) return []
+  return outputs
+    .filter((item): item is { key: string; description?: unknown } => !!item && typeof item === 'object' && typeof (item as { key?: unknown }).key === 'string')
+    .slice(0, 10)
+    .map((item) => ({ key: item.key, description: typeof item.description === 'string' ? item.description.slice(0, 300) : '' }))
+}
 
 async function recordEvidence(admin: AdminClient, organizationId: string, taskId: string, attemptId: string, items: readonly EvidenceItem[]) {
   if (!items.length) return

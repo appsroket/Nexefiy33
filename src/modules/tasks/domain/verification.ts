@@ -29,6 +29,8 @@ export interface TaskReport {
   status: 'completed' | 'partially_completed' | 'not_completed'
   summary: string
   receipts: string[]
+  /** Values a workflow step asked for (plain text, scrubbed); absent for other tasks. */
+  outputs?: Record<string, string>
 }
 
 export type CheckStatus = 'passed' | 'failed' | 'needs_review'

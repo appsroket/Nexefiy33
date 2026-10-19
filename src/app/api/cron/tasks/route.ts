@@ -5,8 +5,9 @@
 // dispatch; the engine's own one-minute schedule does the same, so the cron
 // job is optional there. Without the engine, it runs the dispatcher inline:
 // expires overdue approvals, times out tasks past their deadline, runs
-// approved actions, and runs due employee tasks (including tasks whose server
-// stopped mid-step, which continue from their last checkpoint). Needs
+// approved actions, starts due workflow schedules and advances workflow runs,
+// and runs due employee tasks (including tasks whose server stopped
+// mid-step, which continue from their last checkpoint). Needs
 // CRON_SECRET, the Supabase secret key and an AI model; integration actions
 // also need the credential encryption keys.
 
@@ -16,12 +17,13 @@ import { NextResponse } from 'next/server'
 
 import { isFeatureConfigured, requireFeature } from '@/lib/env/server'
 import { redact } from '@/lib/logging/redact'
-import { getAdminClient } from '@/lib/supabase/admin'
 import { canRunIntegrations, getIntegrationRuntime } from '@/modules/integrations/server/runtime'
-import { dispatchDueTasks, sweepTaskQueue } from '@/modules/tasks/server/dispatch'
+import { dispatchDueTasks } from '@/modules/tasks/server/dispatch'
 import { enqueueDispatch, isEngineConfigured } from '@/modules/tasks/server/engine'
 import { processEmployeeTasks } from '@/modules/tasks/server/runner'
 import { canRunTasks, getTaskRuntimeDeps } from '@/modules/tasks/server/runtime-deps'
+import { processWorkflowRuns } from '@/modules/workflows/server/orchestrator'
+import { getWorkflowRuntimeDeps } from '@/modules/workflows/server/runtime-deps'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -45,10 +47,15 @@ export async function GET(request: Request) {
       await enqueueDispatch('cron')
       return NextResponse.json({ engine: 'trigger.dev', dispatch: 'enqueued' })
     }
+    const workflowDeps = getWorkflowRuntimeDeps()
+    // Inline: advance up to three runs in this request (each claims its own run).
+    const startRuns = async (runs: { runId: string }[]) => {
+      for (const run of runs.slice(0, 3)) await processWorkflowRuns(workflowDeps, 1, run.runId)
+    }
     if (!canRunTasks()) {
-      // No model: still expire approvals and time out tasks, and run approved actions.
-      const swept = await sweepTaskQueue(getAdminClient())
-      return NextResponse.json({ ...swept, tasks: 'not_configured' })
+      // No model: still expire approvals, time out tasks and advance workflow runs (their employee steps wait for a model).
+      const result = await dispatchDueTasks({ admin: workflowDeps.admin, integrations: workflowDeps.integrations, start: async () => {}, startRuns })
+      return NextResponse.json({ ...result, started: 0, tasks: 'not_configured' })
     }
 
     const deps = getTaskRuntimeDeps()
@@ -56,6 +63,7 @@ export async function GET(request: Request) {
     const result = await dispatchDueTasks({
       admin: deps.admin,
       integrations: canRunIntegrations() ? getIntegrationRuntime() : null,
+      startRuns,
       // Inline: run up to three due tasks in this request (each claims its own task).
       start: async (due) => {
         for (const task of due.slice(0, 3)) {

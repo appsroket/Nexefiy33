@@ -62,6 +62,26 @@ export interface EmployeeActor {
   requestedBy: string | null
 }
 
+/**
+ * A tool-action step of a workflow run. Its authority is the activated
+ * version: the step must name exactly this action on this connection, the run
+ * must still be going, and the admin who activated the version must still be
+ * an admin. The action's own approval rules and workspace policy apply as for
+ * anyone else; the step's task (created by the orchestrator) is finished here.
+ */
+export interface WorkflowActor {
+  kind: 'workflow'
+  runId: string
+  nodeId: string
+  /** The step's task (no employee), created by the orchestrator before the request. */
+  taskId: string
+  workflowVersionId: string
+  /** The admin who activated the version. */
+  authorizedBy: string
+  /** The person who started the run (null for scheduled runs). */
+  requestedBy: string | null
+}
+
 export interface ExecuteRequest {
   organizationId: string
   integrationId: string
@@ -69,7 +89,7 @@ export interface ExecuteRequest {
   input: unknown
   /** Same key ⇒ same execution: a retried request never runs the action twice. */
   idempotencyKey: string
-  actor: UserActor | EmployeeActor
+  actor: UserActor | EmployeeActor | WorkflowActor
   /** A stricter starting point than the action's own rules (e.g. the employee's approval rule); it can only add approval. */
   approvalFloor?: ApprovalMode
 }
@@ -226,6 +246,64 @@ async function checkEmployeeActor(
   return { floor: grant.data.decision as ApprovalMode }
 }
 
+/** Minimum role the activator of a workflow version must keep for its runs to act. */
+export const MIN_ROLE_TO_AUTHORIZE_WORKFLOWS: OrganizationRole = 'admin'
+
+/**
+ * A workflow step may act only while its run is going and not cancelled, on
+ * its own task, with the action and connection its activated version names,
+ * and while the version's activator is still an admin.
+ */
+async function checkWorkflowActor(
+  runtime: IntegrationRuntime,
+  request: { organizationId: string; integrationId: string; actionKey: string },
+  actor: WorkflowActor,
+): Promise<IntegrationError | null> {
+  const [run, task, member] = await Promise.all([
+    runtime.admin
+      .from('workflow_runs')
+      .select('status, cancel_requested_at, workflow_version_id, authorized_by')
+      .eq('id', actor.runId)
+      .eq('organization_id', request.organizationId)
+      .maybeSingle(),
+    runtime.admin.from('tasks').select('status, employee_id, workflow_run_id, node_id').eq('id', actor.taskId).eq('organization_id', request.organizationId).maybeSingle(),
+    runtime.admin
+      .from('organization_members')
+      .select('role, status')
+      .eq('organization_id', request.organizationId)
+      .eq('user_id', actor.authorizedBy)
+      .maybeSingle(),
+  ])
+  if (run.error || task.error || member.error) {
+    throw new IntegrationError('unavailable', { message: 'The workflow’s permissions couldn’t be checked.', mayHaveReachedProvider: false })
+  }
+  if (!run.data || !['running', 'waiting'].includes(run.data.status) || run.data.cancel_requested_at) {
+    return new IntegrationError('forbidden', { message: 'This workflow run isn’t going, so it takes no actions.' })
+  }
+  if (run.data.workflow_version_id !== actor.workflowVersionId || run.data.authorized_by !== actor.authorizedBy) {
+    return new IntegrationError('forbidden', { message: 'This action doesn’t belong to the run’s version.' })
+  }
+  if (!task.data || task.data.employee_id || task.data.workflow_run_id !== actor.runId || task.data.node_id !== actor.nodeId || task.data.status !== 'running') {
+    return new IntegrationError('forbidden', { message: 'This step isn’t running for this workflow.' })
+  }
+  if (!member.data || member.data.status !== 'active' || !hasMinRole(member.data.role as OrganizationRole, MIN_ROLE_TO_AUTHORIZE_WORKFLOWS)) {
+    return new IntegrationError('forbidden', { message: 'The person who activated this workflow version is no longer an admin here, so it can’t act. An admin must activate it again.' })
+  }
+  const { data: version, error } = await runtime.admin
+    .from('workflow_versions')
+    .select('graph, graph_schema_version')
+    .eq('id', actor.workflowVersionId)
+    .eq('organization_id', request.organizationId)
+    .maybeSingle()
+  if (error) throw new IntegrationError('unavailable', { message: 'The workflow version couldn’t be loaded.', mayHaveReachedProvider: false })
+  const nodes = ((version?.graph ?? {}) as { nodes?: { id?: unknown; type?: unknown; config?: { toolKey?: unknown; integrationId?: unknown } }[] }).nodes ?? []
+  const node = version?.graph_schema_version === 2 ? nodes.find((item) => item.id === actor.nodeId) : undefined
+  if (!node || node.type !== 'tool_action' || node.config?.toolKey !== request.actionKey || node.config?.integrationId !== request.integrationId) {
+    return new IntegrationError('forbidden', { message: 'The activated workflow version doesn’t include this action on this connection.' })
+  }
+  return null
+}
+
 export type DecisionPreview =
   | { status: 'ok'; decision: 'allow' | 'require_approval' | 'deny'; reason: string }
   | { status: 'refused'; error: NormalizedError }
@@ -294,19 +372,28 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
       if ('error' in checked) return refused(checked.error)
       grantFloor = checked.floor
     }
+    if (actor.kind === 'workflow') {
+      const problem = await checkWorkflowActor(runtime, request, actor)
+      if (problem) return refused(problem)
+    }
 
     const employeeId = actor.kind === 'employee' ? actor.employeeId : null
     let decision = await decide(runtime, request.organizationId, request.integrationId, action, employeeId)
     decision = withFloor(decision, grantFloor, 'The employee’s permission for this action.')
-    decision = withFloor(decision, request.approvalFloor, actor.kind === 'employee' ? 'The employee’s approval rule for this task.' : 'Requested approval.')
+    decision = withFloor(
+      decision,
+      request.approvalFloor,
+      actor.kind === 'employee' ? 'The employee’s approval rule for this task.' : actor.kind === 'workflow' ? 'The workflow step always asks for approval.' : 'Requested approval.',
+    )
     const fingerprint = actionFingerprint(action.key, request.integrationId, input)
     const summary = action.summarize(parsed.data).slice(0, 500)
     const now = runtime.now()
 
     // Task: the unit of work this action belongs to. An employee's action
-    // belongs to the employee's task; a person's action gets its own task.
+    // belongs to the employee's task, a workflow step's to the step's task;
+    // a person's action gets its own task.
     let task: { id: string }
-    if (actor.kind === 'employee') {
+    if (actor.kind === 'employee' || actor.kind === 'workflow') {
       task = { id: actor.taskId }
     } else {
       const taskKey = `integration:${request.idempotencyKey}`
@@ -329,7 +416,7 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
       if (taskError || !data) throw new IntegrationError('unavailable', { message: 'The request couldn’t be recorded.', mayHaveReachedProvider: false })
       task = data
     }
-    const ownsTask = actor.kind === 'user'
+    const ownsTask = actor.kind !== 'employee'
 
     const status = decision.decision === 'deny' ? 'skipped' : decision.decision === 'require_approval' ? 'awaiting_approval' : 'executing'
     const { data: execution, error: executionError } = await runtime.admin
@@ -378,6 +465,7 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
           tool_execution_id: execution.id,
           task_id: task.id,
           ...(actor.kind === 'employee' ? { employee_id: actor.employeeId, employee_version_id: actor.employeeVersionId } : {}),
+          ...(actor.kind === 'workflow' ? { workflow_run_id: actor.runId, workflow_version_id: actor.workflowVersionId } : {}),
           policy_id: decision.policyId,
           action_summary: summary,
           // Approvers see exactly what will be sent.
@@ -403,6 +491,10 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
           .eq('organization_id', request.organizationId)
         if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
         throw new IntegrationError('unavailable', { message: 'The approval request couldn’t be created.', mayHaveReachedProvider: false })
+      }
+      if (actor.kind === 'workflow') {
+        // The step waits for the decision; the decision (or its expiry) finishes the task.
+        await runtime.admin.from('tasks').update({ status: 'waiting_approval' }).eq('id', task.id).eq('organization_id', request.organizationId).eq('status', 'running')
       }
       return { status: 'awaiting_approval', executionId: execution.id, approvalRequestId: approval.id }
     }

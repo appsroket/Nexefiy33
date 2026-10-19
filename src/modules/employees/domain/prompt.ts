@@ -76,8 +76,31 @@ export const ESCALATE_INPUT_SCHEMA = {
   },
 } as const
 
-export function finishToolDescription(): string {
-  return 'Finish the task with a structured report. `status` is completed, partially_completed or not_completed; `summary` is what you tell the requester; `receipts` lists the receipts of actions that succeeded (from their tool results). The platform verifies every receipt.'
+/** Values a workflow step asks the employee to report when it finishes (later steps use them). */
+export interface RequiredOutput {
+  key: string
+  description: string
+}
+
+export function finishToolDescription(outputs: readonly RequiredOutput[] = []): string {
+  const base =
+    'Finish the task with a structured report. `status` is completed, partially_completed or not_completed; `summary` is what you tell the requester; `receipts` lists the receipts of actions that succeeded (from their tool results). The platform verifies every receipt.'
+  if (!outputs.length) return base
+  return `${base} This task is a step of a workflow: also fill in \`outputs\` with each of these values as plain text (later steps use them, so report only what you found; write “unknown” if you couldn’t find it):\n${outputs.map((output) => `- ${output.key}: ${output.description || 'no description'}`).join('\n')}`
+}
+
+/** The finish tool's input schema, with the workflow step's outputs when it asks for any. */
+export function finishInputSchema(outputs: readonly RequiredOutput[] = []): Record<string, unknown> {
+  const schema = structuredClone(FINISH_INPUT_SCHEMA) as unknown as { required: string[]; properties: Record<string, unknown> }
+  if (!outputs.length) return schema as unknown as Record<string, unknown>
+  schema.required = [...schema.required, 'outputs']
+  schema.properties.outputs = {
+    type: 'object',
+    additionalProperties: false,
+    required: outputs.map((output) => output.key),
+    properties: Object.fromEntries(outputs.map((output) => [output.key, { type: 'string', description: output.description }])),
+  }
+  return schema as unknown as Record<string, unknown>
 }
 
 export const FINISH_INPUT_SCHEMA = {

@@ -93,6 +93,15 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - **Deadlines** bound waiting as well as running: a task past its deadline fails as timed out wherever it is, and its pending approvals are withdrawn.
 - Operator controls are SQL functions that check role and state (pgTAP 010); viewers and other organizations get `P0002`.
 
+### 5.7 Workflows (implemented in Phase 12, ADR-027)
+- **Nothing generated runs unreviewed.** Drafts (generated, templated or hand-built) can't run; only an admin activates, by typing the workflow's name. The server validates the **stored** draft — never the browser's copy — with employees, actions, connections, executor decisions and hand-off policies read from the database, and the database checks the graph's outline again. Activated versions are immutable and fingerprinted; runs pin them.
+- **Authority is explicit and revocable.** A run acts on the authority of the admin who activated its version. If that person is no longer an active admin, the orchestrator stops the run and the executor refuses its actions. A workflow tool action (`WorkflowActor`) may run only the action, on the connection, that the version names for that step, while its run is going; the action's own approval requirement, the connection setting and workspace policies apply as for anyone (a step can only add approval).
+- **Employees act under their own grants.** An employee step is an employee task pinned to the employee version recorded at activation; the employee's tools, approval rule, limits and budget apply unchanged, and its result must pass verification when the step requires it.
+- **Delegation only through workflows.** Employees have no tool to create tasks or hand work to another employee. Hand-offs are workflow edges; workspace policy on `workflow.handoff` can block them or require an approval step between the two employees.
+- **Data between steps is data.** References are a restricted grammar resolved over plain values (no code, no prototype access); conditions and transformations use fixed operators; values reaching an employee are framed as data, not instructions, and scrubbed of credential-shaped text; inputs are checked against the version's declarations in SQL and secret-scanned.
+- **Approval steps bind to what the approver sees:** the database computes a gate's fingerprint from its displayed content; a decision must confirm it. Cancelling a run withdraws pending approvals and work at once and discloses completed actions.
+- **Orchestration can't be hijacked by a stale worker:** every write needs the run's current lease token; finished steps never change. Clients can't write versions, triggers, runs or steps; they edit drafts (operators), start, cancel and pause through SQL functions (pgTAP 011).
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).
