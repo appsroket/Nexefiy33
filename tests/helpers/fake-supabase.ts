@@ -121,6 +121,12 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     this.filters.push([column, 'is', value])
     return this
   }
+  /** Only `not(column, 'is', null)`. */
+  not(column: string, operator: 'is', value: null) {
+    if (operator !== 'is' || value !== null) throw new Error('unsupported not()')
+    this.filters.push([column, 'not_null', null])
+    return this
+  }
   gt(column: string, value: unknown) {
     this.filters.push([column, 'gt', value])
     return this
@@ -133,7 +139,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
     this.filters.push([column, 'lt', value])
     return this
   }
-  /** Supports "col.is.null,col.lt.value" style alternatives. */
+  /** Supports "col.is.null,col.lt.value" alternatives, with nested and(...)/or(...) groups. */
   or(expression: string) {
     this.filters.push(['', 'or', expression])
     return this
@@ -170,17 +176,38 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
         return cell !== null && cell !== undefined && String(cell) >= String(value)
       case 'lt':
         return cell !== null && cell !== undefined && String(cell) < String(value)
+      case 'lte':
+        return cell !== null && cell !== undefined && String(cell) <= String(value)
+      case 'not_null':
+        return cell !== null && cell !== undefined
       case 'or':
-        return String(value)
-          .split(',')
-          .some((part) => {
-            const [col, op, ...rest] = part.split('.')
-            const operand = rest.join('.')
-            return FakeQuery.test(row, col!, op!, op === 'is' ? null : operand)
-          })
+        return FakeQuery.logic(row, String(value), 'or')
       default:
         throw new Error(`unsupported operator ${operator}`)
     }
+  }
+
+  private static logic(row: Row, expression: string, kind: 'and' | 'or'): boolean {
+    const parts: string[] = []
+    let depth = 0
+    let current = ''
+    for (const char of expression) {
+      if (char === '(') depth += 1
+      if (char === ')') depth -= 1
+      if (char === ',' && depth === 0) {
+        parts.push(current)
+        current = ''
+      } else current += char
+    }
+    if (current) parts.push(current)
+    const evaluate = (part: string): boolean => {
+      const group = /^(and|or)\((.*)\)$/.exec(part)
+      if (group) return FakeQuery.logic(row, group[2]!, group[1] as 'and' | 'or')
+      const [col, op, ...rest] = part.split('.')
+      if (op === 'not' && rest[0] === 'is') return FakeQuery.test(row, col!, 'not_null', null)
+      return FakeQuery.test(row, col!, op === 'lte' ? 'lte' : op!, op === 'is' ? null : rest.join('.'))
+    }
+    return kind === 'and' ? parts.every(evaluate) : parts.some(evaluate)
   }
 
   private matches(row: Row): boolean {

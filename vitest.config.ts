@@ -12,6 +12,8 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.{ts,tsx}'],
+    // Database integration tests need a local PostgreSQL: npm run db:test:local.
+    exclude: ['tests/integration/**', 'node_modules/**'],
     environment: 'node',
   },
 })

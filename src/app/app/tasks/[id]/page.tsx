@@ -23,18 +23,44 @@ import {
   TASK_STATUS_DISPLAY,
   VERIFICATION_DISPLAY,
 } from '@/modules/tasks/domain/labels'
-import { getTask } from '@/modules/tasks/server/queries'
+import { cancellationDisclosure, formatDuration, priorityLabel, taskControls } from '@/modules/tasks/domain/task-center'
+import { isEngineConfigured } from '@/modules/tasks/server/engine'
+import { getTask, listTaskFilterOptions, type TaskLink } from '@/modules/tasks/server/queries'
 import { canRunTasks } from '@/modules/tasks/server/scheduling'
-import { AutoRefresh, CancelTaskButton, ReplyForm } from '@/modules/tasks/ui/task-controls'
+import { AutoRefresh, PriorityForm, ReassignForm, ReplyForm, TaskControlBar } from '@/modules/tasks/ui/task-controls'
 
 export const metadata: Metadata = { title: 'Task' }
 export const maxDuration = 300
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const CANCELLABLE = ['pending', 'queued', 'running', 'waiting_approval', 'blocked']
 
-function seconds(ms: number): string {
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
+const APPROVAL_STATUS_LABELS: Record<string, string> = {
+  pending: 'Waiting for a decision',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  expired: 'Expired',
+  cancelled: 'Withdrawn',
+}
+
+function TaskLinks({ label, tasks }: { label: string; tasks: TaskLink[] }) {
+  if (!tasks.length) return null
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd>
+        <ul className="flex flex-col gap-1">
+          {tasks.map((linked) => (
+            <li key={linked.id}>
+              <Link href={`/app/tasks/${linked.id}`} className="underline-offset-4 hover:underline">
+                {linked.title}
+              </Link>{' '}
+              <span className="text-muted-foreground">· {TASK_STATUS_DISPLAY[linked.status].label}</span>
+            </li>
+          ))}
+        </ul>
+      </dd>
+    </>
+  )
 }
 
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
@@ -56,9 +82,20 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   const status = TASK_STATUS_DISPLAY[task.status]
   const isOperator = hasMinRole(workspace.role, 'operator')
   const verification = task.result?.verification ?? null
-  const totalCost = task.attempts.reduce((sum, attempt) => sum + attempt.costMicros, 0)
-  const totalActive = task.attempts.reduce((sum, attempt) => sum + attempt.activeMs, 0)
   const waitingApprovals = task.actions.filter((action) => action.status === 'awaiting_approval' && action.approvalRequestId)
+  const controls = taskControls({
+    status: task.status,
+    cancelRequested: task.cancelRequested,
+    pauseRequested: task.pauseRequested,
+    attemptCount: task.attemptCount,
+    failureClass: task.error?.class ?? null,
+    failureCode: task.error?.code ?? null,
+  })
+  const disclosure = cancellationDisclosure(task.actions)
+  const reassignTo =
+    isOperator && controls.reassign
+      ? (await listTaskFilterOptions(workspace.organizationId)).employees.filter((employee) => employee.status === 'active' && employee.id !== task.employeeId)
+      : []
 
   return (
     <>
@@ -82,8 +119,23 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             </>
           ) : undefined
         }
-        actions={<StatusIndicator tone={status.tone} label={status.label} />}
+        actions={
+          <span className="flex items-center gap-2">
+            <Badge variant="outline">{priorityLabel(task.priority)} priority</Badge>
+            <StatusIndicator tone={status.tone} label={status.label} />
+          </span>
+        }
       />
+
+      {task.status === 'cancelled' && disclosure.done.length ? (
+        <Alert>
+          <CircleAlert aria-hidden="true" />
+          <AlertDescription>
+            Cancelling stopped any further work, but {disclosure.done.length === 1 ? 'one action had' : `${disclosure.done.length} actions had`} already been carried out and{' '}
+            {disclosure.done.length === 1 ? 'was' : 'were'} not undone: {disclosure.done.map((action) => action.toolKey).join(', ')}. See Actions below for the receipts.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {task.status === 'queued' && !canRunTasks() ? (
         <Alert>
@@ -92,15 +144,58 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             This task is queued, but tasks don’t run on this deployment until an AI model and the Supabase secret key are configured.
           </AlertDescription>
         </Alert>
+      ) : task.status === 'queued' && !isEngineConfigured() ? (
+        <Alert>
+          <Info aria-hidden="true" />
+          <AlertDescription>
+            No execution engine is configured here, so queued tasks run after a request or from the scheduled cron job, not continuously. Every step is saved, so nothing is lost
+            if a run stops.
+          </AlertDescription>
+        </Alert>
       ) : null}
 
-      <SectionCard title="Status" description={status.description}>
+      <SectionCard title="Overview" description={status.description}>
         <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-sm font-medium">Requested objective</h2>
+            <p className="max-w-3xl text-sm">{task.title}</p>
+            {task.instructions ? <p className="max-w-3xl text-sm whitespace-pre-wrap text-muted-foreground">{task.instructions}</p> : null}
+          </div>
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+            <dt className="text-muted-foreground">Assigned to</dt>
+            <dd>
+              {task.employeeId ? (
+                <Link href={`/app/employees/${task.employeeId}`} className="underline-offset-4 hover:underline">
+                  {task.employeeName ?? 'Employee'}
+                </Link>
+              ) : (
+                '—'
+              )}
+              {task.employeeVersion ? <span className="text-muted-foreground"> · configuration version {task.employeeVersion} (pinned)</span> : null}
+            </dd>
+            <dt className="text-muted-foreground">Workflow</dt>
+            <dd>
+              {task.workflow ? (
+                <>
+                  {task.workflow.name}
+                  {task.workflow.version ? ` · version ${task.workflow.version}` : ''} <span className="text-muted-foreground">· run {task.workflow.runStatus}</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">Not part of a workflow (assigned directly)</span>
+              )}
+            </dd>
             <dt className="text-muted-foreground">Assigned</dt>
             <dd>
               <DateTime value={task.createdAt} />
             </dd>
+            {task.startedAt ? (
+              <>
+                <dt className="text-muted-foreground">Started</dt>
+                <dd>
+                  <DateTime value={task.startedAt} />
+                </dd>
+              </>
+            ) : null}
             {task.completedAt ? (
               <>
                 <dt className="text-muted-foreground">Finished</dt>
@@ -109,16 +204,30 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                 </dd>
               </>
             ) : null}
+            {task.deadlineAt && !task.completedAt ? (
+              <>
+                <dt className="text-muted-foreground">Deadline</dt>
+                <dd>
+                  <DateTime value={task.deadlineAt} /> <span className="text-muted-foreground">(fails as timed out if unfinished)</span>
+                </dd>
+              </>
+            ) : null}
+            <dt className="text-muted-foreground">Duration</dt>
+            <dd>
+              {task.durationMs === null ? 'Not started' : formatDuration(task.durationMs)}
+              {task.activeMs ? <span className="text-muted-foreground"> · {formatDuration(task.activeMs)} working, the rest waiting</span> : null}
+            </dd>
+            <dt className="text-muted-foreground">Cost</dt>
+            <dd>
+              {formatUsd(task.costMicros)} <span className="text-muted-foreground">· {task.inputTokens.toLocaleString('en')} input / {task.outputTokens.toLocaleString('en')} output tokens</span>
+            </dd>
             <dt className="text-muted-foreground">Attempts</dt>
             <dd>
               {task.attemptCount} of {task.maxAttempts}
             </dd>
-            <dt className="text-muted-foreground">Model spend</dt>
-            <dd>
-              {formatUsd(totalCost)} · {seconds(totalActive)} active
-            </dd>
+            <TaskLinks label="Starts after" tasks={task.dependsOn} />
+            <TaskLinks label="Tasks waiting on this" tasks={task.dependents} />
           </dl>
-          {task.instructions ? <p className="max-w-3xl text-sm whitespace-pre-wrap">{task.instructions}</p> : null}
           {task.error ? (
             <Alert variant={task.error.class === 'limit' || task.error.class === 'task' ? 'default' : 'destructive'}>
               <CircleAlert aria-hidden="true" />
@@ -128,7 +237,18 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             </Alert>
           ) : null}
           {task.cancelRequested && task.status === 'running' ? <p className="text-sm text-muted-foreground">Stopping after the current step…</p> : null}
-          {isOperator && CANCELLABLE.includes(task.status) && !task.cancelRequested ? <CancelTaskButton taskId={task.id} /> : null}
+          {task.pauseRequested && task.status === 'running' ? <p className="text-sm text-muted-foreground">Pausing after the current step…</p> : null}
+          {isOperator ? (
+            <div className="flex flex-col gap-4">
+              <TaskControlBar taskId={task.id} controls={controls} disclosure={{ done: disclosure.done, inProgress: disclosure.inProgress.length, withdrawn: disclosure.withdrawn }} />
+              {controls.changePriority || reassignTo.length ? (
+                <div className="flex flex-col gap-4 sm:flex-row">
+                  {controls.changePriority ? <PriorityForm taskId={task.id} priority={task.priority} /> : null}
+                  {reassignTo.length ? <ReassignForm taskId={task.id} employees={reassignTo} /> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </SectionCard>
 
@@ -205,6 +325,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                       tone={action.status === 'succeeded' ? 'success' : ['failed', 'rejected'].includes(action.status) ? 'danger' : action.status === 'awaiting_approval' ? 'warning' : 'neutral'}
                       label={ACTION_STATUS_LABELS[action.status] ?? action.status}
                     />
+                    {action.status === 'succeeded' && action.risk !== 'read' ? <span className="block text-xs text-muted-foreground">Carried out; cancelling doesn’t undo it</span> : null}
                   </TableCell>
                   <TableCell className="text-sm">
                     {action.decision === 'allow' ? 'Ran without approval' : action.decision === 'require_approval' ? 'Needed approval' : 'Blocked'}
@@ -227,6 +348,47 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           </Table>
         ) : (
           <p className="text-sm text-muted-foreground">No integration actions.</p>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Approvals" description="Every approval this task asked for, bound to the exact action it would run.">
+        {task.approvals.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Request</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Requested</TableHead>
+                <TableHead>Decided or expires</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {task.approvals.map((approval) => (
+                <TableRow key={approval.id}>
+                  <TableCell className="max-w-md">
+                    <Link href={`/app/approvals/${approval.id}`} className="underline-offset-4 hover:underline">
+                      {approval.summary}
+                    </Link>
+                    {approval.note ? <span className="block text-xs text-muted-foreground">{approval.note}</span> : null}
+                  </TableCell>
+                  <TableCell>
+                    <StatusIndicator
+                      tone={approval.status === 'approved' ? 'success' : approval.status === 'rejected' ? 'danger' : approval.status === 'pending' ? 'warning' : 'neutral'}
+                      label={APPROVAL_STATUS_LABELS[approval.status] ?? approval.status}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <DateTime value={approval.createdAt} />
+                  </TableCell>
+                  <TableCell>
+                    <DateTime value={approval.decidedAt ?? approval.expiresAt} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p className="text-sm text-muted-foreground">No approvals were needed.</p>
         )}
       </SectionCard>
 
@@ -254,7 +416,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
         )}
       </SectionCard>
 
-      <SectionCard title="Trace" description="Each step, as it was recorded.">
+      <SectionCard title="Executed steps" description="The task’s history, as it was recorded: every step, decision and change of state.">
         {task.events.length ? (
           <ol className="flex flex-col gap-2 text-sm">
             {task.events.map((event) => (
@@ -283,6 +445,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                 <TableHead>Steps</TableHead>
                 <TableHead>Tool calls</TableHead>
                 <TableHead>Tokens (in / out)</TableHead>
+                <TableHead>Active time</TableHead>
                 <TableHead>Cost</TableHead>
               </TableRow>
             </TableHeader>
@@ -300,6 +463,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                   <TableCell>
                     {attempt.inputTokens.toLocaleString('en')} / {attempt.outputTokens.toLocaleString('en')}
                   </TableCell>
+                  <TableCell>{formatDuration(attempt.activeMs)}</TableCell>
                   <TableCell>{formatUsd(attempt.costMicros)}</TableCell>
                 </TableRow>
               ))}

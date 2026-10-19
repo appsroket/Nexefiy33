@@ -1,0 +1,5 @@
+# Local stand-in for Supabase's pg_jsonschema (see supabase/local/supabase-shim.sql).
+comment = 'jsonb_matches_schema backed by Python jsonschema (local testing only)'
+default_version = '0.0.1'
+relocatable = false
+requires = 'plpython3u'

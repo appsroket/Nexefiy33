@@ -7,8 +7,10 @@
 //   → runEmployee with the live invoker, saving a checkpoint, the trace
 //     (execution_events), evidence (task_evidence) and usage (usage_records)
 //     after every step, and renewing the lease
-//   → settle: wait for approval, wait for a reply, retry, fail, cancel, or
-//     verify the result against the platform's own records and finish.
+//   → before every step: stop if the task was cancelled or paused, passed its
+//     deadline, or its employee was paused or archived
+//   → settle: wait for approval, wait for a reply, pause, retry, fail, cancel,
+//     or verify the result against the platform's own records and finish.
 //
 // If the server stops mid-task, the lease expires and the next claim starts
 // a new attempt from the last checkpoint (tool calls are idempotent per call,
@@ -57,7 +59,18 @@ export interface TaskClaim {
   recovered: boolean
 }
 
-export type TaskRunStatus = 'succeeded' | 'failed' | 'waiting_approval' | 'blocked' | 'queued' | 'cancelled'
+export type TaskRunStatus = 'succeeded' | 'failed' | 'waiting_approval' | 'blocked' | 'queued' | 'cancelled' | 'paused' | 'superseded'
+
+/** Why a run stopped before finishing, decided by the checks before each step. */
+type StopReason = 'cancel_requested' | 'pause_requested' | 'deadline_passed' | 'employee_paused' | 'employee_unavailable'
+
+const STOP_MESSAGES: Record<StopReason, string> = {
+  cancel_requested: 'The task was cancelled.',
+  pause_requested: 'The task was paused.',
+  deadline_passed: 'The task passed its deadline.',
+  employee_paused: 'The employee was paused, so the task paused too.',
+  employee_unavailable: 'The employee was archived or removed, so the task stopped.',
+}
 
 export interface TaskRunSummary {
   taskId: string
@@ -72,10 +85,29 @@ class CheckpointError extends Error {
   }
 }
 
+/**
+ * This worker's attempt is no longer the running one: its lease expired and
+ * another worker took over (or the task was cancelled). The worker stops at
+ * once and writes nothing more; the attempt that holds the task carries on.
+ */
+class AttemptSupersededError extends Error {
+  constructor() {
+    super('This attempt was superseded.')
+  }
+}
+
 const ACTIVE_EXECUTION_STATUSES = ['proposed', 'awaiting_approval', 'approved', 'executing']
 
-export async function processEmployeeTasks(deps: TaskRuntimeDeps, limit = 3): Promise<{ claimed: number; results: TaskRunSummary[] }> {
-  const { data, error } = await deps.admin.rpc('claim_employee_tasks', { p_limit: limit, p_lease_seconds: TASK_LEASE_SECONDS })
+/**
+ * Claims up to `limit` due tasks (or the one task `taskId`, when the engine
+ * runs each task as its own job) and runs them one after another.
+ */
+export async function processEmployeeTasks(deps: TaskRuntimeDeps, limit = 3, taskId?: string): Promise<{ claimed: number; results: TaskRunSummary[] }> {
+  const { data, error } = await deps.admin.rpc('claim_employee_tasks', {
+    p_limit: limit,
+    p_lease_seconds: TASK_LEASE_SECONDS,
+    ...(taskId ? { p_task_id: taskId } : {}),
+  })
   if (error) {
     console.error('[tasks] claiming tasks failed', redact({ code: error.code }))
     throw new Error('Queued tasks couldn’t be claimed.')
@@ -93,6 +125,16 @@ export async function processEmployeeTasks(deps: TaskRuntimeDeps, limit = 3): Pr
 }
 
 export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRunSummary> {
+  try {
+    return await runClaim(deps, claim)
+  } catch (error) {
+    if (!(error instanceof AttemptSupersededError)) throw error
+    console.error('[tasks] a worker lost its attempt; it stopped without writing', redact({ taskId: claim.task_id, attempt: claim.attempt_number }))
+    return { taskId: claim.task_id, status: 'superseded' }
+  }
+}
+
+async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRunSummary> {
   const { admin } = deps
   const now = deps.now ?? (() => new Date())
   const organizationId = claim.organization_id
@@ -113,7 +155,7 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
 
   const { data: task, error: taskError } = await admin
     .from('tasks')
-    .select('id, organization_id, employee_id, employee_version_id, title, instructions, max_attempts, created_by, cancel_requested_at')
+    .select('id, organization_id, employee_id, employee_version_id, title, instructions, max_attempts, created_by, cancel_requested_at, deadline_at')
     .eq('id', taskId)
     .eq('organization_id', organizationId)
     .maybeSingle()
@@ -135,8 +177,9 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
     admin.from('organizations').select('name').eq('id', organizationId).maybeSingle(),
   ])
   if (employeeError || versionError) throw new Error('The employee couldn’t be loaded.')
+  if (employee?.status === 'paused') return await settlePaused(deps, claim, 'employee_paused', null, event)
   if (!employee || employee.status !== 'active') {
-    return await settleCancelled(deps, claim, { code: 'employee_inactive', class: 'permanent', message: 'The employee was paused or archived, so the task stopped.' }, null, event)
+    return await settleCancelled(deps, claim, { code: 'employee_inactive', class: 'permanent', message: STOP_MESSAGES.employee_unavailable }, null, event)
   }
   const parsedConfig = version?.config_schema_version === 2 ? employeeConfigSchema.safeParse(version.config) : null
   if (!version || !parsedConfig?.success) {
@@ -194,6 +237,7 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
   })
 
   const leaseUntil = () => new Date(now().getTime() + TASK_LEASE_SECONDS * 1000).toISOString()
+  let stopReason: StopReason | null = null
 
   let result: RunResult
   try {
@@ -215,7 +259,7 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
         ...(deps.sleep ? { sleep: deps.sleep } : {}),
         hooks: {
           async checkpoint(state) {
-            const { error } = await admin
+            const { data, error } = await admin
               .from('task_attempts')
               .update({
                 checkpoint: state as unknown as Json,
@@ -231,7 +275,9 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
               .eq('id', attemptId)
               .eq('organization_id', organizationId)
               .eq('status', 'running')
+              .select('id')
             if (error) throw new CheckpointError(error.code ?? 'unknown')
+            if (!data?.length) throw new AttemptSupersededError()
             await admin
               .from('tasks')
               .update({ lease_expires_at: leaseUntil() })
@@ -244,15 +290,27 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
           },
           async shouldStop() {
             const [{ data: current }, { data: currentEmployee }] = await Promise.all([
-              admin.from('tasks').select('cancel_requested_at').eq('id', taskId).eq('organization_id', organizationId).maybeSingle(),
+              admin.from('tasks').select('cancel_requested_at, pause_requested_at, deadline_at').eq('id', taskId).eq('organization_id', organizationId).maybeSingle(),
               admin.from('ai_employees').select('status').eq('id', task.employee_id!).eq('organization_id', organizationId).maybeSingle(),
             ])
-            return Boolean(current?.cancel_requested_at) || currentEmployee?.status !== 'active'
+            stopReason = current?.cancel_requested_at
+              ? 'cancel_requested'
+              : current?.deadline_at && new Date(current.deadline_at) <= now()
+                ? 'deadline_passed'
+                : current?.pause_requested_at
+                  ? 'pause_requested'
+                  : currentEmployee?.status === 'paused'
+                    ? 'employee_paused'
+                    : currentEmployee?.status !== 'active'
+                      ? 'employee_unavailable'
+                      : null
+            return stopReason ? STOP_MESSAGES[stopReason] : false
           },
         },
       },
     )
   } catch (error) {
+    if (error instanceof AttemptSupersededError) throw error
     const failure: TaskFailure =
       error instanceof CheckpointError
         ? error.code === '23514'
@@ -263,7 +321,7 @@ export async function runClaimedTask(deps: TaskRuntimeDeps, claim: TaskClaim): P
     return await settleFailure(deps, claim, failure, null, event, task.max_attempts)
   }
 
-  return await settle(deps, claim, task.max_attempts, result, event)
+  return await settle(deps, claim, task.max_attempts, result, event, stopReason)
 }
 
 type EventWriter = (eventType: string, level: 'info' | 'warn' | 'error', message: string, data?: Record<string, unknown>) => Promise<void>
@@ -384,13 +442,31 @@ async function finishAttempt(
   result: RunResult | null,
 ) {
   const now = (deps.now ?? (() => new Date()))().toISOString()
-  const { error: updateError } = await deps.admin
+  const { data, error: updateError } = await deps.admin
     .from('task_attempts')
     .update({ status, finished_at: now, ...(error ? { error: error as unknown as Json } : {}), ...(result ? attemptUsage(result) : {}) })
     .eq('id', claim.attempt_id)
     .eq('organization_id', claim.organization_id)
     .eq('status', 'running')
-  if (updateError) console.error('[tasks] finishing an attempt failed', redact({ code: updateError.code }))
+    .select('id')
+  if (updateError) {
+    console.error('[tasks] finishing an attempt failed', redact({ code: updateError.code }))
+    throw new Error('The attempt couldn’t be finished.')
+  }
+  if (!data?.length) throw new AttemptSupersededError()
+}
+
+/** Records usage on the attempt that stays open while its task waits; throws if it was superseded. */
+async function keepAttempt(deps: TaskRuntimeDeps, claim: TaskClaim, result: RunResult) {
+  const { data, error } = await deps.admin
+    .from('task_attempts')
+    .update(attemptUsage(result))
+    .eq('id', claim.attempt_id)
+    .eq('organization_id', claim.organization_id)
+    .eq('status', 'running')
+    .select('id')
+  if (error) throw new Error('The attempt couldn’t be updated.')
+  if (!data?.length) throw new AttemptSupersededError()
 }
 
 async function updateTask(deps: TaskRuntimeDeps, claim: TaskClaim, values: Database['public']['Tables']['tasks']['Update']) {
@@ -452,6 +528,22 @@ async function settleFailure(
   return { taskId: claim.task_id, status: 'failed', failure }
 }
 
+/** Pauses a running task; its attempt stays open and continues from the checkpoint when resumed. */
+async function settlePaused(deps: TaskRuntimeDeps, claim: TaskClaim, reason: 'pause_requested' | 'employee_paused', result: RunResult | null, event: EventWriter): Promise<TaskRunSummary> {
+  const now = (deps.now ?? (() => new Date()))().toISOString()
+  if (result) await keepAttempt(deps, claim, result)
+  await updateTask(deps, claim, {
+    status: 'paused',
+    paused_from: 'queued',
+    paused_at: now,
+    pause_requested_at: null,
+    lease_expires_at: null,
+    ...(result ? { result: taskResult(result, {}) } : {}),
+  })
+  await event('task.paused', 'info', STOP_MESSAGES[reason])
+  return { taskId: claim.task_id, status: 'paused' }
+}
+
 async function settleCancelled(deps: TaskRuntimeDeps, claim: TaskClaim, failure: TaskFailure | null, result: RunResult | null, event: EventWriter): Promise<TaskRunSummary> {
   await finishAttempt(deps, claim, 'cancelled', failure, result)
   await updateTask(deps, claim, {
@@ -465,14 +557,14 @@ async function settleCancelled(deps: TaskRuntimeDeps, claim: TaskClaim, failure:
   return { taskId: claim.task_id, status: 'cancelled', ...(failure ? { failure } : {}) }
 }
 
-async function settle(deps: TaskRuntimeDeps, claim: TaskClaim, maxAttempts: number, result: RunResult, event: EventWriter): Promise<TaskRunSummary> {
+async function settle(deps: TaskRuntimeDeps, claim: TaskClaim, maxAttempts: number, result: RunResult, event: EventWriter, stopReason: StopReason | null): Promise<TaskRunSummary> {
   const { admin } = deps
   const stoppedReason = [...result.transcript].reverse().find((entry) => entry.kind === 'stopped')
   const reason = stoppedReason?.kind === 'stopped' ? stoppedReason.reason : null
 
   switch (result.outcome) {
     case 'waiting_approval': {
-      await admin.from('task_attempts').update(attemptUsage(result)).eq('id', claim.attempt_id).eq('organization_id', claim.organization_id)
+      await keepAttempt(deps, claim, result)
       await updateTask(deps, claim, { status: 'waiting_approval', lease_expires_at: null, result: taskResult(result, {}) })
       // A decision made while the step was still running found the task
       // running and didn't re-queue it; check again now that it waits.
@@ -492,7 +584,7 @@ async function settle(deps: TaskRuntimeDeps, claim: TaskClaim, maxAttempts: numb
 
     case 'escalated': {
       const escalation = [...result.transcript].reverse().find((entry) => entry.kind === 'escalation')
-      await admin.from('task_attempts').update(attemptUsage(result)).eq('id', claim.attempt_id).eq('organization_id', claim.organization_id)
+      await keepAttempt(deps, claim, result)
       await updateTask(deps, claim, {
         status: 'blocked',
         lease_expires_at: null,
@@ -503,7 +595,17 @@ async function settle(deps: TaskRuntimeDeps, claim: TaskClaim, maxAttempts: numb
     }
 
     case 'cancelled':
-      return await settleCancelled(deps, claim, null, result, event)
+      switch (stopReason) {
+        case 'pause_requested':
+        case 'employee_paused':
+          return await settlePaused(deps, claim, stopReason, result, event)
+        case 'deadline_passed':
+          return await settleFailure(deps, claim, { code: 'deadline_passed', class: 'limit', message: 'The task didn’t finish before its deadline.' }, result, event)
+        case 'employee_unavailable':
+          return await settleCancelled(deps, claim, { code: 'employee_inactive', class: 'permanent', message: STOP_MESSAGES.employee_unavailable }, result, event)
+        default:
+          return await settleCancelled(deps, claim, null, result, event)
+      }
 
     case 'limit_reached':
       return await settleFailure(deps, claim, { code: 'limit_reached', class: 'limit', message: reason ?? 'The task reached one of its limits.' }, result, event, maxAttempts)

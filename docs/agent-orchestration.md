@@ -28,10 +28,10 @@ Trigger.dev (ADR-004) runs:
 
 ### State and durability
 
-- Source of truth for run/step status is **Postgres** (`workflow_runs`, `workflow_run_steps`, `tasks`). Trigger.dev holds execution, retries, and waits.
-- Before a step executes: insert step row `running` with `attempt`. After: update with output/status. A step re-executed after a crash finds its row and uses the stored idempotency key.
-- **Waits** (approval, delay, external callback) use Trigger.dev waitpoints/tokens; the token id is stored on the step. Approval decisions complete the token from the API route.
-- **Cancellation / pause:** the orchestrator checks run and employee status before each step; cancelling also cancels the Trigger.dev run.
+- Source of truth for run/task status is **Postgres** (`workflow_runs`, `tasks`, `task_attempts`). Trigger.dev executes jobs (ADR-026): `employee-tasks.sweep` every minute, `employee-tasks.dispatch` on demand, and `employee-tasks.run` per task. A job carries only the task id and claims the task itself under a lease; every write is conditional on still holding the attempt.
+- After every step the runtime saves a checkpoint; a step re-executed after a crash continues from it, and tool calls use stable idempotency keys (`task:<task>:<model call id>`), so they are never repeated.
+- **Waits** (approval, a requester's reply, dependencies, a pause) are task states in Postgres, not engine waitpoints: nothing runs while a task waits. Approval decisions, replies, resumes, retries and finished dependencies re-queue the task (SQL triggers/functions), and the next dispatch starts a job. *(Earlier drafts of this document described waitpoint tokens; replaced so the engine stays replaceable and no decision depends on an engine token.)*
+- **Cancellation / pause:** the runner checks task and employee status and the deadline before each step; cancelling also withdraws pending approvals immediately. Workflow runs (not built) will reuse the same task life cycle.
 
 ### Delivery semantics
 

@@ -253,7 +253,7 @@ select is_empty(
   'owner A cannot change organization B settings'
 );
 select is_empty(
-  $$ update public.ai_employees set name = 'Hacked' where id = 'b2000000-0000-4000-8000-000000000001' returning id $$,
+  $$ update public.ai_employees set avatar_url = null where id = 'b2000000-0000-4000-8000-000000000001' returning id $$,
   'owner A cannot change organization B employees'
 );
 select is_empty(
@@ -307,11 +307,22 @@ select throws_ok(
   'an employee cannot use another organization''s custom skill'
 );
 select throws_ok(
+  $$ insert into public.knowledge_sources (organization_id, name, source_type, integration_id, created_by)
+     values ('a1000000-0000-4000-8000-000000000000', 'Stolen', 'integration', 'b4000000-0000-4000-8000-000000000001',
+       'a0000000-0000-4000-8000-000000000001') $$,
+  '42501', null,
+  'clients cannot create integration-backed knowledge sources'
+);
+-- The composite foreign key holds even for server code.
+reset role;
+select throws_ok(
   $$ insert into public.knowledge_sources (organization_id, name, source_type, integration_id)
      values ('a1000000-0000-4000-8000-000000000000', 'Stolen', 'integration', 'b4000000-0000-4000-8000-000000000001') $$,
   '23503', null,
   'a knowledge source cannot read through another organization''s integration'
 );
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000001", "role": "authenticated"}';
 
 select is_empty(
   $$ select chunk_id from public.match_knowledge_chunks('b1000000-0000-4000-8000-000000000000',

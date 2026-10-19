@@ -85,6 +85,14 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - **Bounded:** steps, tool calls, active time, cost per task, monthly budget, model-call retries (2), attempts (3); a cancelled task or paused employee stops at the next step.
 - **Clients** read tasks, attempts (not checkpoints), events, evidence and executions of their organizations; they change tasks only through `assign_employee_task`, `cancel_employee_task` and `reply_to_employee_task` (operators).
 
+### 5.6 Durable execution (implemented in Phase 11, ADR-026)
+- **The engine executes, the database decides.** Engine jobs carry only a task id; each job claims its task in Postgres under a lease, and every write is conditional on still holding the attempt, so a delayed, duplicated or superseded job cannot act or overwrite. Engine-level retries are off for tasks.
+- **Cancellation prevents future work where it can and says where it can't:** pending approvals are withdrawn immediately (they can no longer be approved), the executor refuses new actions for a task being cancelled, dependents are skipped; actions already carried out are listed with receipts as not undone, and an action executing at that moment is disclosed as possibly completing.
+- **Pause** stops new steps; approvals already pending can still be decided (approving runs that one action — the pause dialog's wording and the task page say so).
+- **Retry** continues from the checkpoint with fresh run limits but the same monthly budget; completed actions are never repeated (idempotency keys per model call). Failures of the task itself (refusal, failed verification, reported not done) can't be retried; a new task must be assigned.
+- **Deadlines** bound waiting as well as running: a task past its deadline fails as timed out wherever it is, and its pending approvals are withdrawn.
+- Operator controls are SQL functions that check role and state (pgTAP 010); viewers and other organizations get `P0002`.
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).

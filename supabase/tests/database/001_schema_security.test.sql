@@ -16,7 +16,8 @@ select is_empty(
   $$ select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
        and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname)
-       and c.relname not in ('integration_secrets', 'provider_webhook_events') $$,
+       and c.relname not in ('integration_secrets', 'provider_webhook_events',
+         'integration_oauth_states', 'integration_rate_limit_windows') $$,
   'every client-visible table has at least one policy (only service-only tables have none)'
 );
 
@@ -106,8 +107,9 @@ select is(
    where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
   array['accept_invitation', 'assign_employee_task', 'cancel_employee_task', 'change_employee_status', 'create_employee',
     'create_invitation', 'create_organization', 'decide_approval', 'employee_test_summary', 'get_invitation',
-    'match_knowledge_chunks', 'reply_to_employee_task', 'reprocess_knowledge_source', 'review_employee_test_run',
-    'save_employee_version', 'search_knowledge'],
+    'match_knowledge_chunks', 'pause_employee_task', 'reassign_employee_task', 'reply_to_employee_task',
+    'reprocess_knowledge_source', 'resume_employee_task', 'retry_employee_task', 'review_employee_test_run',
+    'save_employee_version', 'search_knowledge', 'set_employee_task_priority'],
   'authenticated can call exactly the intended RPCs'
 );
 

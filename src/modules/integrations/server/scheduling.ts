@@ -13,11 +13,9 @@ import { redact } from '@/lib/logging/redact'
 import { getAdminClient } from '@/lib/supabase/admin'
 
 import { processApprovedExecutions } from './executor'
-import { getIntegrationRuntime } from './runtime'
+import { canRunIntegrations, getIntegrationRuntime } from './runtime'
 
-export function canRunIntegrations(): boolean {
-  return isFeatureConfigured('supabaseAdmin') && isFeatureConfigured('credentialEncryption')
-}
+export { canRunIntegrations }
 
 export function scheduleApprovedExecutions(): void {
   if (!canRunIntegrations()) return

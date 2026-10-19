@@ -27,7 +27,7 @@ Latest npm versions observed on 2026-10-17:
 | @supabase/ssr | 0.12.7 | |
 | supabase (CLI) | 2.121.0 | |
 | zod | 4.6.7 | |
-| @trigger.dev/sdk | 4.7.4 | |
+| @trigger.dev/sdk | 4.7.4 | Installed in Phase 11 as **4.7.3** (the newest release at least a week old, ADR-019); `ws` overridden to 8.21.3 to clear the SDK's transitive `ws` advisories. The `trigger.dev` CLI is run with `npx trigger.dev@4.7.3`, not installed (its dependencies carry `tar`/`ws` advisories). |
 | @xyflow/react | 12.12.0 | React Flow |
 | stripe | 23.0.0 | |
 | vitest | 5.0.5 | |
@@ -41,7 +41,7 @@ Latest npm versions observed on 2026-10-17:
 
 Postgres with RLS for tenant isolation, Supabase Auth with `@supabase/ssr`, Storage for documents, pgvector for embeddings. (Integration tokens: see ADR-014.) Use the new `sb_publishable_` / `sb_secret_` keys; legacy JWT keys to be disabled before launch.
 
-## ADR-004 Trigger.dev for durable execution — Proposed
+## ADR-004 Trigger.dev for durable execution — Accepted (Phase 11; see ADR-026 for how it is used)
 
 **Context:** Runs wait hours/days for approvals and must survive deploys and serverless timeouts.
 **Options:** Trigger.dev v4 (TypeScript-native, waitpoint tokens, concurrency keys, schedules, cloud + self-host), Inngest (similar, step functions), Temporal (most powerful, heavier ops), Postgres queue (`pgmq`) + custom workers (most control, most work).
@@ -214,3 +214,21 @@ Web app on Vercel (EU region near Supabase), workers on Trigger.dev Cloud. Voice
 
 **Alternatives:** Trigger.dev now (no keys; the queue moves there later without changing the tables); restarting a task from scratch after an approval (repeats reads and costs, and the model loses what it saw); one attempt per segment (waiting would use up retries); trusting the model's "done" (the risk this phase exists to remove); an LLM judge for verification (costly, and still model output).
 **Consequences:** tasks need the Supabase secret key and an AI model to run; without them they stay queued and the pages say so. There is no cron schedule (`vercel.json`) yet, so a task whose nudge didn't run waits until the cron route is called. `task_runtime` must be applied after `knowledge_pipeline` and `employee_builder` (owner confirmation in the database connector).
+
+## ADR-026 Durable execution: Trigger.dev executes, Postgres records — Accepted (Phase 11)
+
+**Context:** Tasks must be queued, run, wait for approvals or replies for hours or days, pause, resume, retry, time out, depend on other tasks and be cancelled — surviving deploys, serverless timeouts and lost workers — without long work inside web requests. Phase 10 left a Postgres queue with leases and per-step checkpoints, nudged by `after()` and a cron route. ADR-004 picked Trigger.dev v4 with thin wrappers; ADR-005 made Postgres the source of truth.
+**Decision:**
+- **The engine runs jobs; every state change is in Postgres.** `trigger/employee-tasks.ts` defines three jobs: `employee-tasks.sweep` (every minute), `employee-tasks.dispatch` (on demand) and `employee-tasks.run` (one task). Dispatch (`src/modules/tasks/server/dispatch.ts`) expires overdue approvals, times out tasks past their deadline, runs approved actions, lists due tasks and starts one job per task. **Nothing is claimed by the dispatcher:** each job claims its own task (`claim_employee_tasks(p_task_id)`), so a job that starts late, twice or after someone else took the task does nothing.
+- **Job keys per task state.** A job's idempotency key is `employee-task:<task>:<updated_at>`, so one queued state gets one job and a changed task (re-queued after a decision, recovered after a lost lease) gets a new one. Jobs of an organization share a concurrency key, so one workspace can't occupy every worker.
+- **Waits stay in Postgres, not engine waitpoints.** A task waiting for approval or a reply holds no compute and no engine run; the database trigger on tool executions (and the reply/resume/retry functions) re-queues it, and the next dispatch starts a job. This keeps the engine replaceable and means a decision taken while no worker exists is never lost. (docs/agent-orchestration.md described waitpoints; updated.)
+- **Engine retries are off for task jobs.** Retries are attempts in Postgres with failure classes and backoff (ADR-025); the engine retries only the dispatcher.
+- **A superseded worker stops without writing.** Every checkpoint and settlement is conditional on the worker's attempt still being the running one; a worker whose lease expired and was replaced gets "superseded" and writes nothing more.
+- **Life cycle in SQL** (`durable_execution` migration): a `paused` state (pause/resume; a running task pauses after its step; a paused employee pauses its task), per-task deadlines (`deadline_at`, swept by `time_out_overdue_tasks` and checked before every step), dependencies (`task_dependencies`: a task waits as `pending`, is queued when all succeed, skipped when one doesn't — transitively), priority and reassignment before work starts, manual retry from the last checkpoint with a fresh set of run limits (`limitBaseline` in the checkpoint) and three more attempts, and cancellation that withdraws pending approvals at once even mid-step (the executor also refuses new actions for a task being cancelled).
+- **Cancellation is honest about what it can't undo.** The cancel dialog, the action's answer and the task page list the actions that already changed something outside Nexefiy (with receipts) and any action running at that moment.
+- **Without the engine** (development, or before Trigger.dev is set up), requests run one bounded, checkpointed segment after the response and `/api/cron/tasks` runs the dispatcher inline. The task page says when no engine is configured.
+- **Local database tests.** `npm run db:test:local` applies every migration to a throwaway PostgreSQL 16 with a small Supabase stand-in (`supabase/local/`: roles, `auth`, `storage`, `pg_jsonschema` via Python's jsonschema) and runs pgTAP plus `tests/integration` — the real runner, executor, dispatcher and SQL together through a Supabase-client adapter over `pg`. It is evidence about our SQL and code, not about the hosted platform.
+
+**Alternatives:** waitpoints for approvals (holds engine state the database already has; a decision made before the token is stored is lost; harder to replace the engine); the dispatcher claiming tasks and passing claims to jobs (a delayed job could run a task whose lease was re-taken); engine-level retries for task jobs (would duplicate attempts the database already counts); Inngest/Temporal (ADR-004); keeping only the Postgres queue with cron (works, but runs work in requests and polls once a minute at best).
+**Consequences:** Trigger.dev's API is not reachable from the environment this was built in and no project keys exist, so **no job has run on Trigger.dev yet** — the wrappers are typechecked, bundled with the `react-server` condition (no Next.js-only code), and unit-tested with the SDK mocked. Deploying needs `TRIGGER_PROJECT_REF`/`TRIGGER_SECRET_KEY` and the application's server variables in the Trigger.dev project (docs/credential-setup.md). The `durable_execution` migration must be applied after `task_runtime`.
+

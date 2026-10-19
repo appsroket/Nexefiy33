@@ -161,15 +161,21 @@ select ok(
 );
 
 -- Business context: roles -------------------------------------------------------
+reset role;
+alter table public.business_context_items alter column id set default 'ae000000-0000-4000-8000-000000000001';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000003", "role": "authenticated"}';
 
 select lives_ok(
-  $$ insert into public.business_context_items (id, organization_id, kind, title, body)
-     values ('ae000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000000', 'faq',
+  $$ insert into public.business_context_items (organization_id, kind, title, body)
+     values ('a1000000-0000-4000-8000-000000000000', 'faq',
        'Do you ship abroad?', 'Yes, to the EU and the UK.') $$,
   'an operator can add an FAQ'
 );
+reset role;
+alter table public.business_context_items alter column id set default gen_random_uuid();
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000003", "role": "authenticated"}';
 select lives_ok(
   $$ insert into public.business_context_items (organization_id, kind, title, body, attributes)
      values ('a1000000-0000-4000-8000-000000000000', 'goal', 'Faster replies', '', '{"metric": "First reply time", "target": "< 1 hour", "period": "monthly"}') $$,
@@ -199,20 +205,31 @@ select throws_ok(
   'an operator cannot change an entry''s kind'
 );
 
+reset role;
+alter table public.business_context_items alter column id set default 'ae000000-0000-4000-8000-000000000002';
+set local role authenticated;
 set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000002", "role": "authenticated"}';
 
 select lives_ok(
-  $$ insert into public.business_context_items (id, organization_id, kind, title, body, attributes)
-     values ('ae000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000000', 'template',
+  $$ insert into public.business_context_items (organization_id, kind, title, body, attributes)
+     values ('a1000000-0000-4000-8000-000000000000', 'template',
        'Refund confirmation', 'Hi {{name}}, your refund is on its way.', '{"channel": "email", "subject": "Your refund"}') $$,
   'an admin can add a communication template'
 );
+reset role;
+alter table public.business_context_items alter column id set default 'ae000000-0000-4000-8000-000000000003';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000002", "role": "authenticated"}';
 select lives_ok(
-  $$ insert into public.business_context_items (id, organization_id, kind, title, body, attributes)
-     values ('ae000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000000', 'escalation_contact',
+  $$ insert into public.business_context_items (organization_id, kind, title, body, attributes)
+     values ('a1000000-0000-4000-8000-000000000000', 'escalation_contact',
        'Dana Lee', 'Billing disputes over 500 EUR', '{"role": "Finance lead", "email": "dana@example.test", "priority": 1}') $$,
   'an admin can add an escalation contact'
 );
+reset role;
+alter table public.business_context_items alter column id set default gen_random_uuid();
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000002", "role": "authenticated"}';
 select throws_ok(
   $$ insert into public.business_context_items (organization_id, kind, title, attributes)
      values ('a1000000-0000-4000-8000-000000000000', 'escalation_contact', 'No way to reach', '{"role": "Ghost"}') $$,
@@ -347,8 +364,8 @@ with removed as (
   delete from public.knowledge_sources where context_item_id = 'ae000000-0000-4000-8000-000000000001' returning 1)
 select is(count(*)::int, 0, 'an operator cannot delete a business context source directly') from removed;
 select throws_ok(
-  $$ insert into public.knowledge_sources (organization_id, name, source_type, created_by)
-     values ('a1000000-0000-4000-8000-000000000000', 'Fake', 'business_context', 'a0000000-0000-4000-8000-000000000003') $$,
+  $$ insert into public.knowledge_sources (organization_id, name, source_type)
+     values ('a1000000-0000-4000-8000-000000000000', 'Fake', 'business_context') $$,
   '42501', null,
   'clients cannot create business context sources'
 );
@@ -367,32 +384,29 @@ set local role authenticated;
 set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000003", "role": "authenticated"}';
 
 select lives_ok(
-  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path, created_by)
+  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path)
      values ('a1000000-0000-4000-8000-000000000000', 'Policy.pdf', 'file', 'knowledge',
-       'a1000000-0000-4000-8000-000000000000/d0000000-0000-4000-8000-000000000009/Policy.pdf',
-       'a0000000-0000-4000-8000-000000000003') $$,
+       'a1000000-0000-4000-8000-000000000000/d0000000-0000-4000-8000-000000000009/Policy.pdf') $$,
   'an operator can register a file in the organization''s folder'
 );
 select throws_ok(
-  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path, created_by)
+  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path)
      values ('a1000000-0000-4000-8000-000000000000', 'Other bucket', 'file', 'avatars',
-       'a1000000-0000-4000-8000-000000000000/x/file.pdf', 'a0000000-0000-4000-8000-000000000003') $$,
+       'a1000000-0000-4000-8000-000000000000/x/file.pdf') $$,
   '42501', null,
   'files must be in the knowledge bucket'
 );
 select throws_ok(
-  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path, created_by)
+  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path)
      values ('a1000000-0000-4000-8000-000000000000', 'Their prices', 'file', 'knowledge',
-       'b1000000-0000-4000-8000-000000000000/d0000000-0000-4000-8000-000000000002/Prices.pdf',
-       'a0000000-0000-4000-8000-000000000003') $$,
+       'b1000000-0000-4000-8000-000000000000/d0000000-0000-4000-8000-000000000002/Prices.pdf') $$,
   '23514', null,
   'a source cannot point at another organization''s folder'
 );
 select throws_ok(
-  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path, created_by)
+  $$ insert into public.knowledge_sources (organization_id, name, source_type, storage_bucket, storage_path)
      values ('a1000000-0000-4000-8000-000000000000', 'Traversal', 'file', 'knowledge',
-       'a1000000-0000-4000-8000-000000000000/../b1000000-0000-4000-8000-000000000000/d0000000-0000-4000-8000-000000000002/Prices.pdf',
-       'a0000000-0000-4000-8000-000000000003') $$,
+       'a1000000-0000-4000-8000-000000000000/../b1000000-0000-4000-8000-000000000000/d0000000-0000-4000-8000-000000000002/Prices.pdf') $$,
   '23514', null,
   'a source path cannot climb out of the organization''s folder'
 );

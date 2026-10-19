@@ -175,9 +175,10 @@ describe('registerKnowledgeUpload', () => {
         storage_path: path,
         mime_type: 'application/pdf',
         byte_size: 1234,
-        created_by: ME,
       }),
     ])
+    // The database fills created_by from the session; clients may not write it.
+    expect(db.tables.knowledge_sources?.[0]).not.toHaveProperty('created_by')
     expect(scheduleKnowledgeProcessing).toHaveBeenCalledWith(ORG)
   })
 })

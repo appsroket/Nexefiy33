@@ -26,6 +26,11 @@ export function isConnectorConfigured(connector: ConnectorDefinition): boolean {
   return isFeatureConfigured(connector.feature) && isFeatureConfigured('credentialEncryption') && isFeatureConfigured('supabaseAdmin')
 }
 
+/** Running actions needs the Supabase secret key and the credential encryption keys. */
+export function canRunIntegrations(): boolean {
+  return isFeatureConfigured('supabaseAdmin') && isFeatureConfigured('credentialEncryption')
+}
+
 export function getIntegrationRuntime(): IntegrationRuntime {
   const { keyring } = requireFeature('credentialEncryption')
   return {

@@ -1867,6 +1867,10 @@ export type Database = {
         Row: {
           attempt_count: number
           cancel_requested_at: string | null
+          deadline_at: string | null
+          pause_requested_at: string | null
+          paused_at: string | null
+          paused_from: string | null
           completed_at: string | null
           created_at: string
           created_by: string | null
@@ -1895,6 +1899,10 @@ export type Database = {
         Insert: {
           attempt_count?: number
           cancel_requested_at?: string | null
+          deadline_at?: string | null
+          pause_requested_at?: string | null
+          paused_at?: string | null
+          paused_from?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -1923,6 +1931,10 @@ export type Database = {
         Update: {
           attempt_count?: number
           cancel_requested_at?: string | null
+          deadline_at?: string | null
+          pause_requested_at?: string | null
+          paused_at?: string | null
+          paused_from?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -2488,16 +2500,19 @@ export type Database = {
       }
       assign_employee_task: {
         Args: {
+          p_depends_on?: string[]
           p_employee_id: string
           p_idempotency_key: string
           p_instructions: string
+          p_priority?: number
+          p_timeout_minutes?: number
           p_title: string
         }
         Returns: string
       }
       cancel_employee_task: { Args: { p_task_id: string }; Returns: string }
       claim_employee_tasks: {
-        Args: { p_lease_seconds?: number; p_limit?: number }
+        Args: { p_lease_seconds?: number; p_limit?: number; p_task_id?: string }
         Returns: {
           attempt_id: string
           attempt_number: number
@@ -2521,6 +2536,18 @@ export type Database = {
         Args: { p_message: string; p_task_id: string }
         Returns: string
       }
+      pause_employee_task: { Args: { p_task_id: string }; Returns: string }
+      resume_employee_task: { Args: { p_task_id: string }; Returns: string }
+      retry_employee_task: { Args: { p_task_id: string }; Returns: string }
+      set_employee_task_priority: {
+        Args: { p_priority: number; p_task_id: string }
+        Returns: number
+      }
+      reassign_employee_task: {
+        Args: { p_employee_id: string; p_task_id: string }
+        Returns: string
+      }
+      time_out_overdue_tasks: { Args: { p_limit?: number }; Returns: number }
       consume_integration_rate_limit: {
         Args: {
           p_bucket: string

@@ -121,6 +121,11 @@ export interface RunCheckpoint {
   transcript: TranscriptEntry[]
   /** Written by reply_to_employee_task when a person answers an escalation. */
   requesterReply?: { text: string }
+  /**
+   * Written by retry_employee_task: where the run limits start counting
+   * again after a person retried a failed task. Spend and history stay.
+   */
+  limitBaseline?: { turns: number; toolCalls: number; costMicros: number; activeMs: number }
 }
 
 export type TaskRunOutcome = RunOutcome | 'waiting_approval' | 'cancelled'
@@ -135,8 +140,8 @@ export interface RunHooks {
   /** Persists the state; a run started from it continues where this one stopped. Throwing stops the run. */
   checkpoint?(state: RunCheckpoint): Promise<void>
   event?(event: RunEvent): Promise<void> | void
-  /** Checked before every model turn; true ends the run as "cancelled". */
-  shouldStop?(): Promise<boolean>
+  /** Checked before every model turn; true (or a reason) ends the run as "cancelled". */
+  shouldStop?(): Promise<boolean | string>
 }
 
 export interface RunRequest {
@@ -231,7 +236,8 @@ export async function runEmployee(request: RunRequest, deps: RunDeps): Promise<R
   const start = now()
   const priorActiveMs = state.activeMs
   const segmentCostStart = state.costMicros
-  const deadline = start + config.limits.maxRuntimeSeconds * 1000 - priorActiveMs
+  const base = state.limitBaseline ?? { turns: 0, toolCalls: 0, costMicros: 0, activeMs: 0 }
+  const deadline = start + config.limits.maxRuntimeSeconds * 1000 - (priorActiveMs - base.activeMs)
   const transcript = state.transcript
 
   const granted = config.tools.flatMap((grant) => {
@@ -390,7 +396,7 @@ export async function runEmployee(request: RunRequest, deps: RunDeps): Promise<R
       let outcome: ToolOutcome
       if (!entry) {
         outcome = { decision: 'refused', executed: false, isError: true, content: `“${call.name}” isn’t one of your tools.` }
-      } else if (state.toolCalls.length >= config.limits.maxToolCallsPerTask) {
+      } else if (state.toolCalls.length - base.toolCalls >= config.limits.maxToolCallsPerTask) {
         outcome = { decision: 'refused', executed: false, isError: true, content: 'The tool call limit for this task was reached. Finish with what you have or escalate.' }
       } else {
         outcome = await deps.invoker.invoke({
@@ -472,14 +478,15 @@ export async function runEmployee(request: RunRequest, deps: RunDeps): Promise<R
     }
 
     for (;;) {
-      if (await hooks.shouldStop?.()) {
-        transcript.push({ kind: 'stopped', reason: 'The task was cancelled.' })
+      const stopRequested = await hooks.shouldStop?.()
+      if (stopRequested) {
+        transcript.push({ kind: 'stopped', reason: typeof stopRequested === 'string' ? stopRequested : 'The task was cancelled.' })
         await save()
         return finish('cancelled')
       }
-      if (state.turns >= config.limits.maxTurnsPerTask) return stop(`Stopped after ${config.limits.maxTurnsPerTask} steps (the turn limit).`)
+      if (state.turns - base.turns >= config.limits.maxTurnsPerTask) return stop(`Stopped after ${config.limits.maxTurnsPerTask} steps (the turn limit).`)
       const worstCase = maxOutputCostMicros(model, config.model.maxOutputTokens)
-      if (state.costMicros + worstCase > costLimitMicros) return stop('Stopped before the next step could exceed the per-task cost limit.')
+      if (state.costMicros - base.costMicros + worstCase > costLimitMicros) return stop('Stopped before the next step could exceed the per-task cost limit.')
       if (state.costMicros - segmentCostStart + worstCase > request.budgetRemainingMicros) return stop('Stopped: the next step could exceed this month’s budget.')
       if (now() >= deadline) return stop('Stopped: the run reached its time limit.')
 

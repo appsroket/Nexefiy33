@@ -199,11 +199,18 @@ select throws_ok(
   '23514', null, 'unknown config schema versions are rejected'
 );
 select throws_ok(
-  $$ update public.ai_employees set status = 'sleeping' where id = 'a2000000-0000-4000-8000-000000000001' $$,
-  '23514', null, 'invalid employee statuses are rejected'
+  $$ update public.ai_employees set status = 'active' where id = 'a2000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'clients cannot change an employee''s status directly (only change_employee_status can)'
 );
 insert into public.ai_employees (organization_id, name, role_category)
   values ('a1000000-0000-4000-8000-000000000000', 'New hire', 'sales');
+
+-- The constraints hold even for server code.
+reset role;
+select throws_ok(
+  $$ update public.ai_employees set status = 'sleeping' where id = 'a2000000-0000-4000-8000-000000000001' $$,
+  '23514', null, 'invalid employee statuses are rejected'
+);
 select throws_ok(
   $$ update public.ai_employees set status = 'active' where name = 'New hire' $$,
   '23514', null, 'an employee cannot be activated without a configuration version'
@@ -213,6 +220,8 @@ select throws_ok(
      where name = 'New hire' $$,
   '23503', null, 'an employee cannot point at another employee''s configuration version'
 );
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000003", "role": "authenticated"}';
 select throws_ok(
   $$ insert into public.workflow_definitions (organization_id, name, draft_graph)
      values ('a1000000-0000-4000-8000-000000000000', 'Bad draft', '[1, 2, 3]') $$,
@@ -341,7 +350,7 @@ insert into public.approval_requests (id, organization_id, tool_execution_id, ta
     '{"to": "vip@example.test"}', repeat('2', 64), now() + interval '1 hour');
 
 select throws_ok(
-  $$ update public.tool_executions set status = 'executing', started_at = now()
+  $$ update public.tool_executions set status = 'executing', started_at = now(), lease_expires_at = now() + interval '5 minutes'
      where id = 'a8000000-0000-4000-8000-000000000002' $$,
   '42501', null, 'an action that requires approval cannot run before it is approved'
 );
@@ -367,7 +376,7 @@ select throws_ok(
 
 reset role;
 select lives_ok(
-  $$ update public.tool_executions set status = 'executing', started_at = now()
+  $$ update public.tool_executions set status = 'executing', started_at = now(), lease_expires_at = now() + interval '5 minutes'
      where id = 'a8000000-0000-4000-8000-000000000002' $$,
   'the approved action can run'
 );

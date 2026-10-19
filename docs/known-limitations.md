@@ -2,6 +2,24 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 11 (2026-10-19)
+
+### Implemented and verified
+- **Durable execution** (ADR-026): Trigger.dev v4 job definitions (one-minute sweep, on-demand dispatch, one job per task that claims its own task), the dispatcher (approval expiry, deadline timeouts, approved actions, due tasks by priority), requests that only enqueue when the engine is configured, protection against superseded workers, and the task life cycle in SQL: paused state, pause/resume, deadlines, dependencies (pending → queued / skipped), priority, reassignment before work starts, retry from the checkpoint with fresh limits, cancellation that withdraws approvals immediately and discloses completed actions. **Task Center** (`/app/tasks`): filters by status, employee, workflow, date and failure type, search, sorting, paging; detail page with the requested objective, employee and pinned version, workflow and version, executed steps, actions (receipts; completed changes marked as not undone by cancelling), approvals, errors, result and verification, cost, tokens, duration and active time, dependencies, and the controls above.
+- **Tested against a real PostgreSQL for the first time:** all 19 migrations applied to a local PostgreSQL 16 with a Supabase stand-in, **pgTAP 001–010: 499 tests pass**, and **13 database integration tests pass** — persistence of every step, recovery after a worker dies (new attempt from the checkpoint, no action repeated, the dead worker can't write when it wakes), approval waits and resumption, cancellation mid-step and while waiting (approval withdrawn, dependents skipped, completed actions recorded and disclosed), pause/resume, deadlines, manual and automatic retries, dependencies and priority, and the Task Center queries and actions under each user's RLS. Vitest (no database): 588+. `tsc`, ESLint, `next build`, bundle scan; the worker bundle builds with the `react-server` condition and contains no Next.js-only code.
+- Running the database locally found and fixed: **document uploads would always have failed** (the upload sent `created_by`, a column clients may not write; it now relies on the column default); pgTAP 001–004, 006 and 009 had fallen behind Phases 8–10 (service-only tables, column grants, explicit ids, a guarded approval deadline) and were updated.
+
+### Not verified yet
+- **No Trigger.dev job has run.** Trigger.dev's API is blocked from the environment this was built in and no project exists; the jobs are unit-tested with the SDK mocked. Until a project is deployed (docs/credential-setup.md E5), tasks run after requests and from `/api/cron/tasks`, and the task page says so.
+- **Migrations `knowledge_pipeline`, `employee_builder`, `task_runtime` and `durable_execution` are still not applied to the dev project**, and pgTAP has not run there (only locally, on PostgreSQL 16 with a stand-in for Supabase's auth, storage and pg_jsonschema).
+- Still no live model call, no live HubSpot/Slack call, and no signed-in browser check of the Task Center.
+
+### Limitations
+- Pausing doesn't freeze approvals already pending: deciding one runs (or withdraws) that single action.
+- Reassignment is only possible before the first attempt (a checkpoint belongs to the employee that made it).
+- Workflow runs don't exist yet, so the workflow filter and the detail page's workflow section only show workflow tasks seeded directly; the queue and life cycle are ready for them.
+- Escalations and approvals still notify nobody.
+
 ## As of Phase 10 (2026-10-18)
 
 ### Implemented and verified

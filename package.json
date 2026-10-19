@@ -20,12 +20,14 @@
     "env:generate-key": "tsx scripts/generate-encryption-key.ts",
     "db:test:sync": "tsx scripts/db/sync-test-fixtures.ts",
     "db:types": "supabase gen types typescript --linked --schema public > src/lib/supabase/database.types.ts",
-    "check:bundle": "tsx scripts/check-bundle.ts"
+    "check:bundle": "tsx scripts/check-bundle.ts",
+    "db:test:local": "bash scripts/db/local-test.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.118.0",
+    "@trigger.dev/sdk": "4.7.3",
     "class-variance-authority": "0.7.1",
     "cmdk": "1.1.1",
     "cn": "0.4.0",
@@ -43,16 +45,21 @@
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "10.12.0",
     "eslint-config-next": "16.4.0",
     "jszip": "3.10.2",
+    "pg": "8.23.1",
     "shadcn": "4.21.4",
     "tailwindcss": "4.3.3",
     "tsx": "4.23.15",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "ws": "8.21.3"
   }
 }

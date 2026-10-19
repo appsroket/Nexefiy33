@@ -9,7 +9,9 @@
 //   permanent   — retrying can't help (bad configuration, missing key,
 //                 invalid request, the employee is no longer active).
 //   limit       — the task hit one of its limits (steps, tool calls, time,
-//                 cost, monthly budget). Never retried: limits are the point.
+//                 cost, monthly budget, its deadline). Never retried
+//                 automatically: limits are the point. A person may retry it
+//                 with a fresh set of run limits (retry_employee_task).
 //   task        — the work itself didn't succeed (the model declined, the
 //                 employee couldn't complete it, or verification failed).
 //                 Not retried automatically; a person decides.

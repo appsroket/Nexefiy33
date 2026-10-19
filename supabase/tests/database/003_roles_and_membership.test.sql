@@ -130,7 +130,7 @@ select throws_ok(
   '42501', null, 'viewers cannot create employees'
 );
 select is_empty(
-  $$ update public.ai_employees set name = 'Renamed' where organization_id = 'a1000000-0000-4000-8000-000000000000' returning id $$,
+  $$ update public.ai_employees set avatar_url = null where organization_id = 'a1000000-0000-4000-8000-000000000000' returning id $$,
   'viewers cannot change employees'
 );
 select is_empty(

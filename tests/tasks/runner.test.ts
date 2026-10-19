@@ -223,8 +223,17 @@ describe('running an employee task', () => {
     expect(broke.results[0]).toMatchObject({ status: 'failed', failure: { code: 'budget_exhausted', class: 'limit' } })
   })
 
-  it('stops a task whose employee was paused', async () => {
+  it('pauses a task whose employee was paused, to resume once it is active again', async () => {
     db.tables.ai_employees![0]!.status = 'paused'
+    const { deps, model } = await setup([search])
+    const { results } = await processEmployeeTasks(deps)
+    expect(results[0]).toMatchObject({ status: 'paused' })
+    expect(task()).toMatchObject({ status: 'paused', paused_from: 'queued', lease_expires_at: null })
+    expect(model.turn).not.toHaveBeenCalled()
+  })
+
+  it('stops a task whose employee was archived', async () => {
+    db.tables.ai_employees![0]!.status = 'archived'
     const { deps, model } = await setup([search])
     const { results } = await processEmployeeTasks(deps)
     expect(results[0]).toMatchObject({ status: 'cancelled', failure: { code: 'employee_inactive' } })
@@ -234,7 +243,9 @@ describe('running an employee task', () => {
 
   it('ends the task when its progress can’t be saved because it contains something credential-shaped', async () => {
     const { deps } = await setup([search])
-    db.errorFor = (table, operation) => (table === 'task_attempts' && operation === 'update' ? { code: '23514' } : null)
+    // Only the checkpoint write breaks the constraint; recording the failure still works.
+    let checkpointWrites = 0
+    db.errorFor = (table, operation) => (table === 'task_attempts' && operation === 'update' && (checkpointWrites += 1) === 1 ? { code: '23514' } : null)
     const { results } = await processEmployeeTasks(deps)
     expect(results[0]).toMatchObject({ status: 'failed', failure: { code: 'not_recorded', class: 'permanent' } })
   })

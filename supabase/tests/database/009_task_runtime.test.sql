@@ -370,8 +370,12 @@ select ok(
 -- Expiring approvals --------------------------------------------------------------
 
 reset role;
-update public.approval_requests set expires_at = created_at + interval '1 millisecond'
+-- Backdate the deadline (the guard forbids changing it, so it is lifted for
+-- this one statement; the transaction is rolled back).
+alter table public.approval_requests disable trigger guard_approval_request;
+update public.approval_requests set created_at = now() - interval '2 hours', expires_at = now() - interval '1 hour'
   where id = 'b9000000-0000-4000-8000-000000000001';
+alter table public.approval_requests enable trigger guard_approval_request;
 set local role service_role;
 select is(public.expire_overdue_approvals(10), 1, 'an overdue approval is expired');
 reset role;

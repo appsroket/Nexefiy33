@@ -266,6 +266,7 @@ describe('browser bundle hygiene', () => {
     'src/modules/models/domain/catalog.ts',
     'src/modules/tasks/domain/failures.ts',
     'src/modules/tasks/domain/labels.ts',
+    'src/modules/tasks/domain/task-center.ts',
     'src/modules/tasks/domain/untrusted.ts',
     'src/modules/tasks/domain/verification.ts',
   ]

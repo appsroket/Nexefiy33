@@ -216,7 +216,7 @@ export async function registerKnowledgeUpload(input: {
       storage_path: path,
       mime_type: type.mimeType,
       byte_size: size,
-      created_by: user.id,
+      // created_by defaults to auth.uid(); clients may not write it.
     })
     .select('id')
   if (error || data.length === 0) {

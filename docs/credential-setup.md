@@ -310,7 +310,9 @@ Dashboard: <https://cloud.trigger.dev/>
 | `TRIGGER_SECRET_KEY` | **server** (`tr_dev_…`, `tr_prod_…`, per environment) |
 | `TRIGGER_PROJECT_REF` | server (`proj_…`) |
 
-Steps: create the project (EU region if offered), copy the project ref, copy the secret key of each environment from *API keys*, and add the variables the tasks need (e.g. `SUPABASE_SECRET_KEY`, `ANTHROPIC_API_KEY`, the encryption keyring) in the Trigger.dev dashboard — workers do **not** read Vercel's variables. Local development uses `npx trigger.dev@latest dev`.
+Steps: create the project (EU region if offered), copy the project ref, copy the secret key of each environment from *API keys*, and add the variables the jobs need in the Trigger.dev dashboard — workers do **not** read Vercel's variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_APP_URL`, `SUPABASE_SECRET_KEY`, `ANTHROPIC_API_KEY`, `APP_ENV`, the credential encryption keyring (`INTEGRATION_ENCRYPTION_KEYS`, `INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID`), the HubSpot/Slack client credentials if connected, and `VOYAGE_API_KEY` if used. Then set `TRIGGER_SECRET_KEY` and `TRIGGER_PROJECT_REF` on Vercel too (the app enqueues jobs with them) and deploy the jobs with `TRIGGER_PROJECT_REF=proj_… npx trigger.dev@4.7.3 deploy` (local development: `npx trigger.dev@4.7.3 dev`). The jobs live in `trigger/employee-tasks.ts`; the one-minute schedule (`employee-tasks.sweep`) is registered by the deploy.
+
+With Trigger.dev configured, requests only enqueue work and nothing long runs in a web request. Without it, tasks run one checkpointed segment after the request that queued them and from `/api/cron/tasks` (E7).
 
 **Rotation:** regenerate the environment's secret key in the dashboard, update Vercel, redeploy.
 

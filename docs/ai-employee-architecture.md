@@ -126,10 +126,10 @@ Tiers → models and prices (`domain/catalog.ts`, USD per million input/output t
 
 ## 10. Running a task
 
-1. **Assign** (`/app/employees/[id]`, operators, active employees only): `assign_employee_task` queues the task, pins the active version, records `task.queued` and an audit event. A double submit returns the same task.
-2. **Claim**: `claim_employee_tasks` (service role) leases queued tasks and tasks whose lease expired; a lost attempt ends `timed_out` and a new attempt continues from the last checkpoint, up to `max_attempts` (3). Runs after the response (`after()`) and from `/api/cron/tasks`.
+1. **Assign** (`/app/employees/[id]`, operators, active employees only): `assign_employee_task` queues the task (or leaves it `pending` until the tasks it depends on succeed), with a priority and a deadline (default 3 days), pins the active version, records `task.queued`/`task.pending` and an audit event. A double submit returns the same task.
+2. **Dispatch and claim** (Phase 11, ADR-026): the dispatcher (Trigger.dev job every minute and on demand; without the engine, after the response and from `/api/cron/tasks`) expires overdue approvals, times out tasks past their deadline, runs approved actions and starts one job per due task, highest priority first. The job claims its own task with `claim_employee_tasks(p_task_id)` (service role), which leases it; a lost attempt ends `timed_out` and a new attempt continues from the last checkpoint, up to `max_attempts` (3); a task whose cancellation or pause was requested, or whose deadline passed, is settled instead of run.
 3. **Assemble context** (first step): business context in the system prompt; the task text; knowledge retrieved for it (only the sources the version allows; skipped when nothing relevant) as framed evidence.
-4. **Run** `runEmployee` in live mode. After every step the runner saves the checkpoint, renews the lease, and records the trace (`execution_events`: `model.turn` with tokens/cost/duration, `tool.called` with decision and receipt, `tool.suspicious_content`, retries), evidence (`task_evidence`) and usage (`usage_records` per step, so a stopped server never loses spend). Before each step it checks for cancellation and that the employee is still active.
+4. **Run** `runEmployee` in live mode. After every step the runner saves the checkpoint, renews the lease, and records the trace (`execution_events`: `model.turn` with tokens/cost/duration, `tool.called` with decision and receipt, `tool.suspicious_content`, retries), evidence (`task_evidence`) and usage (`usage_records` per step, so a stopped server never loses spend). Before each step it checks for cancellation, a pause request, the deadline, and that the employee is still active. If its attempt was superseded (its lease expired and another worker took over), it stops without writing anything.
 5. **Settle** by outcome:
 
 | Outcome | Task | Next |
@@ -139,7 +139,9 @@ Tiers → models and prices (`domain/catalog.ts`, USD per million input/output t
 | completed | `succeeded` or `failed` | **verification** (below) |
 | limit reached / refused | `failed` (class `limit` / `task`) | not retried |
 | model error | `queued` again or `failed` | transient errors retry as a new attempt with backoff (30 s, 60 s…); permanent ones fail |
-| cancelled / employee paused | `cancelled` | — |
+| pause requested / employee paused | `paused` | the attempt stays open; `resume_employee_task` re-queues it and it continues from the checkpoint (an employee must be active again first) |
+| deadline passed | `failed` (class `limit`, `deadline_passed`) | a person may retry it (new deadline) |
+| cancelled / employee archived | `cancelled` | dependents are skipped |
 
 **Failure classes** (`tasks/domain/failures.ts`): transient (retried), permanent, limit, task. Tool failures are not task failures: they go back to the model as error results and verification reports them; a write whose outcome is unknown is never resent.
 
@@ -147,12 +149,14 @@ Tiers → models and prices (`domain/catalog.ts`, USD per million input/output t
 
 **Prompt injection** (`tasks/domain/untrusted.ts`): every integration result is scrubbed of credential-shaped strings and wrapped in `<tool_result trust="untrusted">` with forged delimiters neutralized; knowledge passages keep their own framing. Instruction-like content is flagged in the trace and evidence, and from then on **every write in that task waits for approval** (runtime context → invoker floor). The organization, connection and recipients' authority never come from the model: the connection comes from the grant, the organization from the task, and the executor re-checks everything.
 
+**Operator controls** (`/app/tasks/[id]`, through SQL functions that re-check role and state): cancel (pending approvals are withdrawn at once, even mid-step; the page and the answer list actions already carried out, which cancelling doesn't undo, and any action running right now), pause and resume, retry a failed task (not one whose result failed verification or was reported as not done: a new attempt continues from the last checkpoint with a fresh set of run limits — `limitBaseline` — and three more attempts; completed actions are not repeated), change priority, reassign before any attempt has started. Dependencies: a task that depends on others is queued when all succeed and skipped (transitively) when one doesn't.
+
 **Approvals and tasks.** Approving runs the action (executor, re-checking connection, scopes, policy, payload, and that the employee is still active with the grant), then the waiting task. Rejecting, expiring (`expire_overdue_approvals`, cron) or cancelling withdraws it; the task continues and the employee is told it didn't happen.
 
 ## 11. Not built yet
 
 - Workflows and chat (the task runtime is ready for workflow tasks: same claim, same runtime).
 - Escalation notifications: an escalated task waits on its page; nobody is emailed.
-- A durable engine (Trigger.dev): the queue is Postgres with leases, nudged after responses and by `/api/cron/tasks`; there is no `vercel.json` cron schedule yet.
+- A Trigger.dev project: the jobs exist (`trigger/employee-tasks.ts`) but have not been deployed or run; until they are, tasks run after responses and from `/api/cron/tasks` (no `vercel.json` schedule).
 - Memory, voice and multi-employee coordination.
 - Entitlement limits (`employees.max` per plan) aren't enforced (billing isn't built).

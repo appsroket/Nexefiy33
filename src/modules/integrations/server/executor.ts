@@ -204,7 +204,7 @@ async function checkEmployeeActor(
 ): Promise<{ floor: ApprovalMode } | { error: IntegrationError }> {
   const [employee, task, grant] = await Promise.all([
     runtime.admin.from('ai_employees').select('status').eq('id', actor.employeeId).eq('organization_id', request.organizationId).maybeSingle(),
-    runtime.admin.from('tasks').select('status, employee_id').eq('id', actor.taskId).eq('organization_id', request.organizationId).maybeSingle(),
+    runtime.admin.from('tasks').select('status, employee_id, cancel_requested_at').eq('id', actor.taskId).eq('organization_id', request.organizationId).maybeSingle(),
     runtime.admin
       .from('employee_tool_permissions')
       .select('decision')
@@ -221,6 +221,7 @@ async function checkEmployeeActor(
   if (!task.data || task.data.employee_id !== actor.employeeId || task.data.status !== 'running') {
     return { error: new IntegrationError('forbidden', { message: 'This task isn’t running for this employee.' }) }
   }
+  if (task.data.cancel_requested_at) return { error: new IntegrationError('forbidden', { message: 'This task was cancelled, so it takes no new actions.' }) }
   if (!grant.data) return { error: new IntegrationError('forbidden', { message: 'This employee wasn’t granted that action on this connection.' }) }
   return { floor: grant.data.decision as ApprovalMode }
 }

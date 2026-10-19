@@ -24,7 +24,7 @@ import { approvalText, ConfigSummary } from '@/modules/employees/ui/config-summa
 import { LifecycleControls, type ActivationSummary } from '@/modules/employees/ui/lifecycle-controls'
 import { MODELS, TIER_LABELS } from '@/modules/models/domain/catalog'
 import { TASK_STATUS_DISPLAY } from '@/modules/tasks/domain/labels'
-import { listTasks } from '@/modules/tasks/server/queries'
+import { listDependableTasks, listEmployeeTasks } from '@/modules/tasks/server/queries'
 import { canRunTasks } from '@/modules/tasks/server/scheduling'
 import { AssignTaskForm } from '@/modules/tasks/ui/task-controls'
 
@@ -58,9 +58,10 @@ export default async function EmployeePage({
   const [options, query, tasks] = [
     await loadEditorOptions(workspace.organizationId),
     await searchParams,
-    await listTasks(workspace.organizationId, { employeeId: id, limit: 10 }),
+    await listEmployeeTasks(workspace.organizationId, id, 10),
   ]
   const canAssign = employee.state === 'active' && hasMinRole(workspace.role, 'operator')
+  const dependable = canAssign ? await listDependableTasks(workspace.organizationId) : []
   const tools = listEmployeeTools()
 
   const current = employee.versions.find((version) => version.id === employee.currentVersionId) ?? null
@@ -200,7 +201,11 @@ export default async function EmployeePage({
                   </AlertDescription>
                 </Alert>
               )}
-              <AssignTaskForm employeeId={employee.id} requestKey={randomUUID()} />
+              <AssignTaskForm
+                employeeId={employee.id}
+                requestKey={randomUUID()}
+                dependable={dependable.map((task) => ({ id: task.id, title: task.title, statusLabel: TASK_STATUS_DISPLAY[task.status].label }))}
+              />
             </>
           ) : null}
           {tasks.length ? (

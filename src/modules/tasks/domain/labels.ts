@@ -3,21 +3,22 @@
 import type { FailureClass } from './failures'
 import type { CheckStatus, Verification, VerificationCheck } from './verification'
 
-export const TASK_STATUSES = ['pending', 'queued', 'running', 'waiting_approval', 'blocked', 'succeeded', 'failed', 'cancelled', 'skipped'] as const
+export const TASK_STATUSES = ['pending', 'queued', 'running', 'waiting_approval', 'blocked', 'paused', 'succeeded', 'failed', 'cancelled', 'skipped'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 
 export const TASK_STATUS_DISPLAY: Record<TaskStatus, { label: string; tone: Tone; description: string }> = {
-  pending: { label: 'Pending', tone: 'neutral', description: 'Not queued yet.' },
+  pending: { label: 'Waiting on other tasks', tone: 'neutral', description: 'Queued once every task it depends on has succeeded.' },
   queued: { label: 'Queued', tone: 'info', description: 'Waiting for the employee to pick it up.' },
   running: { label: 'Running', tone: 'info', description: 'The employee is working on it.' },
   waiting_approval: { label: 'Waiting for approval', tone: 'warning', description: 'An action needs a person’s approval before the employee continues.' },
   blocked: { label: 'Needs your reply', tone: 'warning', description: 'The employee escalated and is waiting for an answer.' },
+  paused: { label: 'Paused', tone: 'neutral', description: 'Nothing runs until someone resumes it. Actions already waiting for approval can still be decided.' },
   succeeded: { label: 'Done', tone: 'success', description: 'The employee finished the task.' },
   failed: { label: 'Failed', tone: 'danger', description: 'The task didn’t finish.' },
   cancelled: { label: 'Cancelled', tone: 'neutral', description: 'The task was stopped.' },
-  skipped: { label: 'Skipped', tone: 'neutral', description: 'The task wasn’t run.' },
+  skipped: { label: 'Skipped', tone: 'neutral', description: 'The task wasn’t run because a task it depends on didn’t succeed.' },
 }
 
 /** Tasks that can still change on their own (the page refreshes while it shows one). */
