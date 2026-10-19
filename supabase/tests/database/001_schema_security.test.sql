@@ -105,7 +105,9 @@ select is_empty(
 select is(
   (select array_agg(p.proname::text order by p.proname::text) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
-  array['accept_invitation', 'assign_employee_task', 'cancel_employee_task', 'cancel_workflow_run', 'change_employee_status',
+  array['accept_invitation', 'analytics_action_metrics', 'analytics_evidence', 'analytics_model_usage',
+    'analytics_outcome_metrics', 'analytics_task_failures', 'analytics_task_metrics', 'analytics_workflow_metrics',
+    'assign_employee_task', 'cancel_employee_task', 'cancel_workflow_run', 'change_employee_status',
     'change_workflow_status', 'complete_handed_off_task', 'create_employee', 'create_invitation', 'create_organization',
     'decide_approval', 'emergency_stop_employee', 'employee_test_summary', 'get_invitation', 'hand_off_employee_task',
     'lift_emergency_stop', 'match_knowledge_chunks', 'pause_employee_task', 'reassign_employee_task',

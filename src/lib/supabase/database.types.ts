@@ -1457,7 +1457,9 @@ export type Database = {
           organization_id: string
           outcome_key: string
           quantity: number
+          subject: string | null
           task_id: string | null
+          tool_execution_id: string | null
           unit: string | null
           value_minor: number | null
           workflow_run_id: string | null
@@ -1473,7 +1475,9 @@ export type Database = {
           organization_id: string
           outcome_key: string
           quantity?: number
+          subject?: string | null
           task_id?: string | null
+          tool_execution_id?: string | null
           unit?: string | null
           value_minor?: number | null
           workflow_run_id?: string | null
@@ -1489,7 +1493,9 @@ export type Database = {
           organization_id?: string
           outcome_key?: string
           quantity?: number
+          subject?: string | null
           task_id?: string | null
+          tool_execution_id?: string | null
           unit?: string | null
           value_minor?: number | null
           workflow_run_id?: string | null
@@ -1514,6 +1520,13 @@ export type Database = {
             columns: ["task_id", "organization_id"]
             isOneToOne: false
             referencedRelation: "tasks"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "outcome_records_tool_execution_fk"
+            columns: ["tool_execution_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "tool_executions"
             referencedColumns: ["id", "organization_id"]
           },
           {
@@ -2761,6 +2774,122 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      analytics_action_metrics: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          actions_failed: number
+          actions_rejected: number
+          actions_requested: number
+          actions_settled: number
+          actions_succeeded: number
+          actions_withdrawn: number
+          error_code: string | null
+          grain: string
+          key: string
+        }[]
+      }
+      analytics_evidence: {
+        Args: {
+          p_flag: string
+          p_from: string
+          p_grain?: string
+          p_key?: string
+          p_limit?: number
+          p_offset?: number
+          p_organization_id: string
+          p_source: string
+          p_to: string
+        }
+        Returns: { item: Json; total: number }[]
+      }
+      analytics_model_usage: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          calls: number
+          cost_micros: number
+          input_tokens: number
+          model: string
+          output_tokens: number
+          source: string
+        }[]
+      }
+      analytics_outcome_metrics: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          grain: string
+          key: string
+          outcome_key: string
+          quantity: number
+          records: number
+          subjects: number
+        }[]
+      }
+      analytics_task_failures: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          failure_class: string
+          failure_code: string
+          grain: string
+          key: string
+          tasks: number
+        }[]
+      }
+      analytics_task_metrics: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          active_ms: number
+          active_p50_ms: number | null
+          approvals_approved: number
+          approvals_expired: number
+          approvals_rejected: number
+          approvals_requested: number
+          cost_micros: number
+          duration_p50_ms: number | null
+          duration_p90_ms: number | null
+          grain: string
+          input_tokens: number
+          key: string
+          output_tokens: number
+          person_controls: number
+          recovery_attempted: number
+          response_p50_ms: number | null
+          retries: number
+          tasks_cancelled: number
+          tasks_completed: number
+          tasks_completed_by_person: number
+          tasks_created: number
+          tasks_failed: number
+          tasks_finished: number
+          tasks_handoff: number
+          tasks_intervened: number
+          tasks_needs_review: number
+          tasks_open: number
+          tasks_recovered: number
+          tasks_responded: number
+          tasks_retried: number
+          tasks_skipped: number
+          tasks_verified: number
+        }[]
+      }
+      analytics_workflow_metrics: {
+        Args: { p_from: string; p_organization_id: string; p_to: string }
+        Returns: {
+          cost_micros: number
+          duration_p50_ms: number | null
+          duration_p90_ms: number | null
+          grain: string
+          key: string
+          runs_cancelled: number
+          runs_failed: number
+          runs_finished: number
+          runs_open: number
+          runs_rejected: number
+          runs_started: number
+          runs_succeeded: number
+          runs_with_failed_step: number
+          steps_failed: number
+        }[]
+      }
       complete_handed_off_task: {
         Args: { p_note?: string; p_outcome: string; p_task_id: string }
         Returns: string

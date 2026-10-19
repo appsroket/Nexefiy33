@@ -2,6 +2,22 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 15 (2026-10-19)
+
+### Implemented and verified
+- **Analytics** (ADR-030, docs/analytics.md): tasks created and completed, verified completion rate, failures by class and code, retries and recovery success, human intervention (approvals, handoffs, task controls from the audit log), model usage and cost, integration errors by provider and code, execution time (medians and 90th percentiles), workflow run performance, and outcome metrics (leads marked qualified, contacts created, CRM notes, messages sent, time to first message) — for the workspace, departments, employees and workflows, with every number labelled measured/calculated/estimate and linked to the rows behind it; one estimate (month-end model spend). Pages under `/app/analytics`.
+- **Tests:** pgTAP 014 (34 checks); 3 database integration tests in `tests/integration/analytics.test.ts` (each metric from real runner/executor activity, every count and rate equal to its evidence, SQL/TypeScript outcome parity, admin-only usage, cross-workspace isolation); unit tests for the catalogue and calculations; pgTAP 001–014 (729) and 34 integration tests pass on local PostgreSQL 16; the dashboard rendered in Chromium with a layout fixture (no overflow at 390 px).
+
+### Not verified yet
+- **Migration `analytics` is not applied to the dev project** (nor the seven before it). No dashboard has shown real workspace data: the pages were not opened signed in.
+
+### Limitations
+- Appointments booked, tickets resolved, revenue and customer response time can't be measured (no calendar, help desk, deals or inbound channel integration). No hours-saved figure by design.
+- Model cost is at list prices from the model catalog; invoices can differ.
+- Aggregates scan the period's rows on each page load; no materialized rollups, no export, no charts over time, no custom periods in the UI (evidence links carry exact windows), times in UTC only.
+- Department attribution uses the employee version that ran the task; outcome records without a task show "No department set".
+- Outcome records written before the migration are backfilled only from actions whose payloads were not yet purged.
+
 ## As of Phase 14 (2026-10-19)
 
 ### Implemented and verified

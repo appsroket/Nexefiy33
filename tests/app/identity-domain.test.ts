@@ -238,6 +238,11 @@ describe('browser bundle hygiene', () => {
   // Client components may import these, so they must stay free of Zod (about 60 kB).
   const ZOD_FREE = [
     'src/lib/forms/action-state.ts',
+    'src/modules/analytics/domain/calculations.ts',
+    'src/modules/analytics/domain/evidence.ts',
+    'src/modules/analytics/domain/metrics.ts',
+    'src/modules/analytics/domain/outcomes.ts',
+    'src/modules/analytics/domain/period.ts',
     'src/modules/identity/domain/auth.ts',
     'src/modules/identity/domain/invitations.ts',
     'src/modules/identity/domain/members.ts',

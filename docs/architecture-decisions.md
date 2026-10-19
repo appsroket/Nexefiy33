@@ -275,3 +275,13 @@ Web app on Vercel (EU region near Supabase), workers on Trigger.dev Cloud. Voice
 **Alternatives:** keeping connection-level "allow" (an admin toggle without a named, versioned, attributable decision); evaluating policies only in TypeScript (a direct API or service-role path could bypass them); cancelling employee tasks on emergency stop (loses work; pausing is reversible); a separate approvals service (the database already holds the state).
 **Consequences:** Existing connection settings of "allow" on HubSpot writes and Slack posts now mean "needs approval" until an admin writes a policy naming them. The financial, personnel and destructive categories have no connector yet; their rules are ready for when one exists. Verified on local PostgreSQL and in-memory only; migration `governance_controls` must be applied after `employee_skills_catalog`.
 
+## ADR-030 Analytics: facts in SQL, labelled metrics, outcomes proven by actions — Accepted (Phase 15)
+
+**Context:** Businesses need to see what their AI workforce does, how reliably, with how much human help and at what cost, and which business results it produced, without the platform overstating any of it. All the underlying records already existed; nothing aggregated them.
+**Decision:**
+- **Facts, then aggregates.** Per-row facts functions (`private.analytics_{task,action,run,outcome}_facts`) expose one flag per metric; `public.analytics_*_metrics` aggregate them with `GROUPING SETS` (organization, department, employee, workflow, provider); `public.analytics_evidence` lists the rows behind any flag. A number and its evidence therefore come from the same predicate.
+- **SECURITY DEFINER with explicit checks.** Members get the same aggregates (person interventions come from the audit log, which only admins read row by row); each function checks membership (admin for model usage) and filters by organization; periods ≤ 366 days.
+- **Every metric is labelled** measured, calculated or estimate, with its method, in one catalogue (`src/modules/analytics/domain/metrics.ts`) shown in the app. One estimate (month-end spend projection). No hours saved, no revenue.
+- **Outcomes are proven by actions.** A trigger on `tool_executions` records outcome rows when an AI action succeeds, linked to the execution and task; unsupported outcomes are listed with what they need.
+**Consequences:** dashboards scan the period's rows on each load (indexes on `(organization_id, created_at/queued_at)`); fine at current scale, materialized rollups later if needed. New outcomes need a migration and a parity test case. Department attribution follows the employee version that ran the task.
+
