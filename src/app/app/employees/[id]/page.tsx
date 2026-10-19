@@ -22,6 +22,9 @@ import { getEmployee, loadEditorOptions } from '@/modules/employees/server/queri
 import { listEmployeeTools } from '@/modules/employees/server/tools'
 import { approvalText, ConfigSummary } from '@/modules/employees/ui/config-summary'
 import { LifecycleControls, type ActivationSummary } from '@/modules/employees/ui/lifecycle-controls'
+import { ACTION_CATEGORY_INFO, RISK_TIER_INFO, type ActionCategory } from '@/modules/governance/domain/risk'
+import { listEmployeeGrants } from '@/modules/governance/server/queries'
+import { EmployeeEmergencyStop, RevokeToolButton } from '@/modules/governance/ui/employee-controls'
 import { MODELS, TIER_LABELS } from '@/modules/models/domain/catalog'
 import { TASK_STATUS_DISPLAY } from '@/modules/tasks/domain/labels'
 import { listDependableTasks, listEmployeeTasks } from '@/modules/tasks/server/queries'
@@ -55,11 +58,13 @@ export default async function EmployeePage({
   const { workspace } = gate
   const employee = await getEmployee(workspace.organizationId, id)
   if (!employee) notFound()
-  const [options, query, tasks] = [
+  const [options, query, tasks, grants] = [
     await loadEditorOptions(workspace.organizationId),
     await searchParams,
     await listEmployeeTasks(workspace.organizationId, id, 10),
+    await listEmployeeGrants(workspace.organizationId, id),
   ]
+  const isAdmin = hasMinRole(workspace.role, 'admin')
   const canAssign = employee.state === 'active' && hasMinRole(workspace.role, 'operator')
   const dependable = canAssign ? await listDependableTasks(workspace.organizationId) : []
   const tools = listEmployeeTools()
@@ -180,6 +185,34 @@ export default async function EmployeePage({
           {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
         </div>
       </SectionCard>
+
+      {employee.activatedAt ? (
+        <SectionCard
+          title="Permissions in force"
+          description="What this employee may use right now: written when its version was activated, narrowed by workspace policy on every call. Revoking takes effect at once."
+          action={employee.state === 'active' && hasMinRole(workspace.role, 'operator') ? <EmployeeEmergencyStop employeeId={employee.id} name={employee.name} /> : undefined}
+        >
+          {grants.length ? (
+            <ul className="flex flex-col divide-y text-sm">
+              {grants.map((grant) => {
+                const tier = RISK_TIER_INFO[ACTION_CATEGORY_INFO[grant.category as ActionCategory]?.tier ?? 'low']
+                return (
+                  <li key={`${grant.toolKey}:${grant.integrationId ?? ''}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{grant.title}</span>
+                      <StatusIndicator tone={tier.tone} label={`${tier.label} risk`} />
+                      <span className="text-muted-foreground">{grant.decision === 'allow' ? 'Its own rule: no extra approval' : grant.decision === 'deny' ? 'Blocked' : 'Its own rule: needs approval'}</span>
+                    </span>
+                    {isAdmin ? <RevokeToolButton employeeId={employee.id} toolKey={grant.toolKey} toolTitle={grant.title} integrationId={grant.integrationId} /> : null}
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">No tools: everything was revoked, or the active version grants none.</p>
+          )}
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Tasks"

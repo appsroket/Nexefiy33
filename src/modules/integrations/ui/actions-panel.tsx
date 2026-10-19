@@ -13,8 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { IDLE_ACTION_STATE } from '@/lib/forms/action-state'
 
+import { ACTION_CATEGORY_INFO, isConsequential, RISK_TIER_INFO } from '@/modules/governance/domain/risk'
+
 import type { ActionSettingView } from '../server/queries'
 import { updateActionSetting } from '../server/actions'
+import { allowedApprovalModes } from '../domain/policy'
 import { APPROVAL_MODE_LABELS, RISK_LABELS, type ActionSummary, type ApprovalMode } from '../domain/types'
 
 const SELECT_CLASS =
@@ -32,7 +35,13 @@ function idempotencyLabel(action: ActionSummary): string {
 }
 
 function approvalModesFor(action: ActionSummary): ApprovalMode[] {
-  return action.approval === 'always' || action.risk === 'sensitive' ? ['require_approval', 'deny'] : ['allow', 'require_approval', 'deny']
+  return allowedApprovalModes(action.approval, action.risk, action.category)
+}
+
+/** A stored "allow" no longer counts for a consequential action; show what applies. */
+function effectiveMode(action: ActionSummary, setting: ActionSettingView | undefined): ApprovalMode {
+  const mode = setting?.approvalMode ?? action.defaultApprovalMode
+  return approvalModesFor(action).includes(mode) ? mode : 'require_approval'
 }
 
 function SettingForm({
@@ -48,7 +57,7 @@ function SettingForm({
 }) {
   const [state, formAction, pending] = useActionState(updateActionSetting, IDLE_ACTION_STATE)
   const enabled = setting?.enabled ?? true
-  const mode = setting?.approvalMode ?? action.defaultApprovalMode
+  const mode = effectiveMode(action, setting)
 
   return (
     <form action={formAction} className="flex flex-col gap-2" aria-label={`Settings for ${action.title}`}>
@@ -119,6 +128,9 @@ export function ActionsPanel({
               <h3 className="font-medium">{action.title}</h3>
               <code className="text-xs text-muted-foreground">{action.key}</code>
               <Badge variant={action.risk === 'read' ? 'secondary' : 'outline'}>{RISK_LABELS[action.risk]}</Badge>
+              <Badge variant="outline">
+                {ACTION_CATEGORY_INFO[action.category].label} · {RISK_TIER_INFO[ACTION_CATEGORY_INFO[action.category].tier].label} risk
+              </Badge>
               {setting && !setting.enabled ? <Badge variant="outline">Off</Badge> : null}
             </div>
             <p className="text-sm text-muted-foreground">{action.description}</p>
@@ -131,8 +143,12 @@ export function ActionsPanel({
             <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
               <dt className="text-muted-foreground">Approval</dt>
               <dd>
-                {APPROVAL_MODE_LABELS[setting?.approvalMode ?? action.defaultApprovalMode]}
-                {action.approval === 'always' ? ' (always required)' : ''}
+                {APPROVAL_MODE_LABELS[effectiveMode(action, setting)]}
+                {action.approval === 'always'
+                  ? ' (always required)'
+                  : isConsequential(action.category)
+                    ? ' (only a workspace policy can let it run without approval)'
+                    : ''}
               </dd>
               <dt className="text-muted-foreground">Scopes</dt>
               <dd className="font-mono text-xs leading-5">{action.scopes.join(', ')}</dd>

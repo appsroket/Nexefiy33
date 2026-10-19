@@ -26,6 +26,8 @@ The service (secret) key is used only in: workers, webhook handlers, billing syn
 
 ## 3. Policy engine
 
+> Implemented as described in §5.8 (Phase 14). The list below was the original design; where they differ, §5.8 and ADR-029 describe what exists.
+
 Input: `{ organizationId, employeeId, toolKey, risk, input (validated), connection, context }`.
 Output: `{ decision: 'allow' | 'require_approval' | 'deny', reason, matchedRule }`.
 
@@ -102,6 +104,14 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 - **Approval steps bind to what the approver sees:** the database computes a gate's fingerprint from its displayed content; a decision must confirm it. Cancelling a run withdraws pending approvals and work at once and discloses completed actions.
 - **Orchestration can't be hijacked by a stale worker:** every write needs the run's current lease token; finished steps never change. Clients can't write versions, triggers, runs or steps; they edit drafts (operators), start, cancel and pause through SQL functions (pgTAP 011).
 
+### 5.8 Governance (implemented in Phase 14, ADR-029)
+- **Risk tiers.** Every action has a category and tier (src/modules/governance/domain/risk.ts): read and draft are low; changes inside Nexefiy and to business records are medium; messages people read are high; money, people records and deletion are critical (no connector exists for those yet).
+- **Decision order** (src/modules/integrations/domain/policy.ts, executor): emergency stop (AI work) → action turned off → workspace allowlist (AI work) → connection setting / declared default → consequential actions need approval → any matching deny/require-approval rule → an authorized, exact "allow" may waive approval → the employee's grant and approval rule can only add approval. Recorded on the execution with category, tier, policy and revision.
+- **Approvals:** bound to the payload fingerprint (database) and to the connection account, versions and policy revisions (checked before running). Only a signed-in member with the required role approves (trigger); never the service role, never the requester when a separate approver is required, never during an emergency stop. Expired approvals can only expire; a changed payload needs a new review.
+- **Stops and revocation** are database operations (`set_emergency_stop`, `emergency_stop_employee`, `revoke_employee_tool`, revoked connections), so they hold for every code path; actions already running at a provider can't be recalled and are disclosed as such.
+- **Limits and data access** from policy narrow each employee's configuration in the runner and the test playground (runtime, per-task cost, employee and workspace monthly spend, blocked or required-named knowledge sources); activation refuses tools outside an allowlist.
+- **Tested against direct calls:** pgTAP 013 (every function and table as each role, the service role and another workspace) and `tests/integration/governance.test.ts` (real runner, executor and SQL; people act through RPC/REST-equivalent calls under RLS).
+
 ## 6. Application security baseline
 
 - Security headers (CSP with nonces, HSTS, frame-ancestors none, referrer-policy).
@@ -113,4 +123,4 @@ Every decision is recorded in `tool_invocations.policy_decision` and `task_event
 
 ## 7. Governance features for customers
 
-Approval inbox, kill switches, spending limits, audit log, per-employee autonomy, connection-level revoke, and clear run timelines showing *why* each action happened.
+Built (Phase 14, not yet used live): approval inbox with risk and binding shown, workspace emergency stop and per-employee stop, versioned workspace policies (rules, approver roles, separate approvers, expiry, tool allowlists, data access, spending and duration limits), per-tool revocation, human handoff, audit log page (admins), evidence retention with hold, and task timelines showing *why* each action happened. Not built: notifications for approvals and stops, policy simulation/dry runs, export of the audit log.

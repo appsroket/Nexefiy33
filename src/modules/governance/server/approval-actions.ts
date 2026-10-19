@@ -33,7 +33,8 @@ const decisionSchema = z.object({
 
 const MESSAGES: Record<string, string> = {
   P0002: 'This request doesn’t exist or needs a higher role to decide.',
-  '55000': 'This request has already been decided.',
+  '55000': 'This request has already been decided, or the workspace’s emergency stop is on (nothing can be approved until it is lifted).',
+  '42501': 'You requested this action, so someone else must approve it.',
   '40001': 'The proposed action changed after you opened it. Reload and review it again.',
 }
 

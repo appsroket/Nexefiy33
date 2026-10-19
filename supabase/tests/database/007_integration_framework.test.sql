@@ -303,8 +303,11 @@ insert into public.approval_requests (id, organization_id, tool_execution_id, ta
     payload_sha256, expires_at)
 values ('a9000000-0000-4000-8000-000000000005', 'a1000000-0000-4000-8000-000000000000', 'a8000000-0000-4000-8000-000000000005',
   'a7000000-0000-4000-8000-000000000002', 'Post to #sales', '{"channel": "C1"}', repeat('5', 64), now() + interval '1 day');
-update public.approval_requests set status = 'approved', decided_at = now() where id = 'a9000000-0000-4000-8000-000000000005';
-update public.tool_executions set status = 'approved' where id = 'a8000000-0000-4000-8000-000000000005';
+-- Approved by a signed-in owner (only a member with the required role can approve).
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "a0000000-0000-4000-8000-000000000001", "role": "authenticated"}';
+select public.decide_approval('a9000000-0000-4000-8000-000000000005', 'approved', repeat('5', 64));
+reset role;
 
 insert into public.tool_executions (id, organization_id, task_id, integration_id, tool_key, risk_level, input_sha256,
     status, policy_decision, idempotency_key, lease_expires_at, attempt_count, started_at, pending_input)

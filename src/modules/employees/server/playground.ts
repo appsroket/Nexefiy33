@@ -11,6 +11,8 @@ import 'server-only'
 
 import type { AdminClient } from '@/lib/supabase/admin'
 import type { Json } from '@/lib/supabase/types'
+import { effectiveKnowledgeAccess, effectiveLimits } from '@/modules/governance/domain/policy'
+import { loadControls } from '@/modules/governance/server/state'
 import type { UserActor } from '@/modules/integrations/server/executor'
 import type { IntegrationRuntime } from '@/modules/integrations/server/runtime'
 import { formatBusinessContextForModel } from '@/modules/knowledge/domain/business-context'
@@ -116,8 +118,13 @@ export async function runEmployeeTest(request: TestRunRequest, deps: PlaygroundD
   }
   if (!input) return { status: 'refused', message: 'Write a request for the employee to handle.' }
 
+  // Tests run under the same workspace policy as live tasks: limits and data access only narrow.
+  const { controls } = await loadControls(admin, organizationId)
+  const governed = { ...config.data, limits: effectiveLimits(config.data.limits, controls) }
+  const knowledgeAccess = effectiveKnowledgeAccess(config.data.knowledge, controls)
+
   const spent = await monthlySpendMicros(admin, organizationId, employeeId, now())
-  const budgetMicros = Math.round(config.data.budget.monthlyUsd * 1_000_000)
+  const budgetMicros = Math.round(Math.min(config.data.budget.monthlyUsd, controls.limits.employeeMonthlyUsd ?? Infinity) * 1_000_000)
   if (spent >= budgetMicros) return { status: 'refused', message: 'This employee has used its monthly budget. Raise the budget in the editor to keep testing.' }
 
   // Runs left "running" by a stopped server would otherwise stay that way forever.
@@ -162,7 +169,7 @@ export async function runEmployeeTest(request: TestRunRequest, deps: PlaygroundD
     employeeId,
     runId: run.id,
     actor: request.actor,
-    knowledge: config.data.knowledge,
+    knowledge: { access: knowledgeAccess.access, sourceIds: knowledgeAccess.sourceIds, maxPassages: config.data.knowledge.maxPassages, excludeSourceIds: knowledgeAccess.excludeSourceIds },
     admin,
     embedder: deps.embedder,
     integrations: deps.integrations,
@@ -175,7 +182,7 @@ export async function runEmployeeTest(request: TestRunRequest, deps: PlaygroundD
         employeeName: employee.name,
         organizationName,
         instructions: version.instructions,
-        config: config.data,
+        config: governed,
         input,
         businessContext,
         budgetRemainingMicros: budgetMicros - spent,

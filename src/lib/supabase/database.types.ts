@@ -99,7 +99,9 @@ export type Database = {
       }
       approval_requests: {
         Row: {
+          action_category: string | null
           action_summary: string
+          binding: Json
           created_at: string
           decided_at: string | null
           decided_by: string | null
@@ -108,22 +110,26 @@ export type Database = {
           employee_version_id: string | null
           expires_at: string
           id: string
+          kind: string
           organization_id: string
           payload_sha256: string
           policy_id: string | null
           policy_revision: number | null
           proposed_action: Json
           required_role: string
+          risk_tier: string | null
+          separate_approver: boolean
           status: string
           task_id: string
           tool_execution_id: string | null
           updated_at: string
           workflow_run_id: string | null
           workflow_version_id: string | null
-          kind: string
         }
         Insert: {
+          action_category?: string | null
           action_summary: string
+          binding?: Json
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
@@ -132,22 +138,26 @@ export type Database = {
           employee_version_id?: string | null
           expires_at: string
           id?: string
+          kind?: string
           organization_id: string
           payload_sha256: string
           policy_id?: string | null
           policy_revision?: number | null
           proposed_action: Json
           required_role?: string
+          risk_tier?: string | null
+          separate_approver?: boolean
           status?: string
           task_id: string
           tool_execution_id?: string | null
           updated_at?: string
           workflow_run_id?: string | null
           workflow_version_id?: string | null
-          kind?: string
         }
         Update: {
+          action_category?: string | null
           action_summary?: string
+          binding?: Json
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
@@ -156,19 +166,21 @@ export type Database = {
           employee_version_id?: string | null
           expires_at?: string
           id?: string
+          kind?: string
           organization_id?: string
           payload_sha256?: string
           policy_id?: string | null
           policy_revision?: number | null
           proposed_action?: Json
           required_role?: string
+          risk_tier?: string | null
+          separate_approver?: boolean
           status?: string
           task_id?: string
           tool_execution_id?: string | null
           updated_at?: string
           workflow_run_id?: string | null
           workflow_version_id?: string | null
-          kind?: string
         }
         Relationships: [
           {
@@ -1135,6 +1147,56 @@ export type Database = {
           },
         ]
       }
+      organization_governance: {
+        Row: {
+          emergency_stop_at: string | null
+          emergency_stop_by: string | null
+          emergency_stop_reason: string | null
+          event_retention_days: number | null
+          evidence_retention_days: number | null
+          last_purged_at: string | null
+          organization_id: string
+          payload_retention_days: number | null
+          retention_hold: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          emergency_stop_at?: string | null
+          emergency_stop_by?: string | null
+          emergency_stop_reason?: string | null
+          event_retention_days?: number | null
+          evidence_retention_days?: number | null
+          last_purged_at?: string | null
+          organization_id: string
+          payload_retention_days?: number | null
+          retention_hold?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          emergency_stop_at?: string | null
+          emergency_stop_by?: string | null
+          emergency_stop_reason?: string | null
+          event_retention_days?: number | null
+          evidence_retention_days?: number | null
+          last_purged_at?: string | null
+          organization_id?: string
+          payload_retention_days?: number | null
+          retention_hold?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_governance_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_invitations: {
         Row: {
           accepted_at: string | null
@@ -1234,6 +1296,8 @@ export type Database = {
       }
       organization_policies: {
         Row: {
+          authorized_by: string | null
+          authorized_role: string | null
           created_at: string
           created_by: string | null
           description: string | null
@@ -1249,6 +1313,8 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          authorized_by?: string | null
+          authorized_role?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -1264,6 +1330,8 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          authorized_by?: string | null
+          authorized_role?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -1281,6 +1349,68 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "organization_policies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_policy_versions: {
+        Row: {
+          authorized_by: string | null
+          authorized_role: string | null
+          change: string
+          changed_by: string | null
+          created_at: string
+          description: string | null
+          enabled: boolean
+          id: string
+          name: string
+          organization_id: string
+          policy: Json
+          policy_id: string
+          policy_schema_version: number
+          priority: number
+          revision: number
+        }
+        Insert: {
+          authorized_by?: string | null
+          authorized_role?: string | null
+          change: string
+          changed_by?: string | null
+          created_at?: string
+          description?: string | null
+          enabled: boolean
+          id?: string
+          name: string
+          organization_id: string
+          policy: Json
+          policy_id: string
+          policy_schema_version: number
+          priority: number
+          revision: number
+        }
+        Update: {
+          authorized_by?: string | null
+          authorized_role?: string | null
+          change?: string
+          changed_by?: string | null
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          id?: string
+          name?: string
+          organization_id?: string
+          policy?: Json
+          policy_id?: string
+          policy_schema_version?: number
+          priority?: number
+          revision?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_policy_versions_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -1870,16 +2000,19 @@ export type Database = {
         Row: {
           attempt_count: number
           cancel_requested_at: string | null
-          deadline_at: string | null
-          pause_requested_at: string | null
-          paused_at: string | null
-          paused_from: string | null
           completed_at: string | null
           created_at: string
           created_by: string | null
+          deadline_at: string | null
+          emergency_paused_at: string | null
           employee_id: string | null
           employee_version_id: string | null
           error: Json | null
+          handed_off_at: string | null
+          handed_off_by: string | null
+          handed_off_to: string | null
+          handoff_note: string | null
+          handoff_requested_at: string | null
           id: string
           idempotency_key: string
           input: Json
@@ -1888,6 +2021,9 @@ export type Database = {
           max_attempts: number
           node_id: string | null
           organization_id: string
+          pause_requested_at: string | null
+          paused_at: string | null
+          paused_from: string | null
           priority: number
           result: Json | null
           result_ref: string | null
@@ -1902,16 +2038,19 @@ export type Database = {
         Insert: {
           attempt_count?: number
           cancel_requested_at?: string | null
-          deadline_at?: string | null
-          pause_requested_at?: string | null
-          paused_at?: string | null
-          paused_from?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
+          deadline_at?: string | null
+          emergency_paused_at?: string | null
           employee_id?: string | null
           employee_version_id?: string | null
           error?: Json | null
+          handed_off_at?: string | null
+          handed_off_by?: string | null
+          handed_off_to?: string | null
+          handoff_note?: string | null
+          handoff_requested_at?: string | null
           id?: string
           idempotency_key: string
           input?: Json
@@ -1920,6 +2059,9 @@ export type Database = {
           max_attempts?: number
           node_id?: string | null
           organization_id: string
+          pause_requested_at?: string | null
+          paused_at?: string | null
+          paused_from?: string | null
           priority?: number
           result?: Json | null
           result_ref?: string | null
@@ -1934,16 +2076,19 @@ export type Database = {
         Update: {
           attempt_count?: number
           cancel_requested_at?: string | null
-          deadline_at?: string | null
-          pause_requested_at?: string | null
-          paused_at?: string | null
-          paused_from?: string | null
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
+          deadline_at?: string | null
+          emergency_paused_at?: string | null
           employee_id?: string | null
           employee_version_id?: string | null
           error?: Json | null
+          handed_off_at?: string | null
+          handed_off_by?: string | null
+          handed_off_to?: string | null
+          handoff_note?: string | null
+          handoff_requested_at?: string | null
           id?: string
           idempotency_key?: string
           input?: Json
@@ -1952,6 +2097,9 @@ export type Database = {
           max_attempts?: number
           node_id?: string | null
           organization_id?: string
+          pause_requested_at?: string | null
+          paused_at?: string | null
+          paused_from?: string | null
           priority?: number
           result?: Json | null
           result_ref?: string | null
@@ -1996,6 +2144,7 @@ export type Database = {
       }
       tool_executions: {
         Row: {
+          action_category: string | null
           attempt_count: number
           created_at: string
           employee_id: string | null
@@ -2010,12 +2159,14 @@ export type Database = {
           organization_id: string
           output_redacted: Json | null
           output_ref: string | null
+          payload_purged_at: string | null
           pending_input: Json | null
           policy_decision: string
           policy_id: string | null
           policy_reason: string | null
           requested_by: string | null
           risk_level: string
+          risk_tier: string | null
           started_at: string | null
           status: string
           task_attempt_id: string | null
@@ -2024,6 +2175,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          action_category?: string | null
           attempt_count?: number
           created_at?: string
           employee_id?: string | null
@@ -2038,12 +2190,14 @@ export type Database = {
           organization_id: string
           output_redacted?: Json | null
           output_ref?: string | null
+          payload_purged_at?: string | null
           pending_input?: Json | null
           policy_decision: string
           policy_id?: string | null
           policy_reason?: string | null
           requested_by?: string | null
           risk_level: string
+          risk_tier?: string | null
           started_at?: string | null
           status?: string
           task_attempt_id?: string | null
@@ -2052,6 +2206,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          action_category?: string | null
           attempt_count?: number
           created_at?: string
           employee_id?: string | null
@@ -2066,12 +2221,14 @@ export type Database = {
           organization_id?: string
           output_redacted?: Json | null
           output_ref?: string | null
+          payload_purged_at?: string | null
           pending_input?: Json | null
           policy_decision?: string
           policy_id?: string | null
           policy_reason?: string | null
           requested_by?: string | null
           risk_level?: string
+          risk_tier?: string | null
           started_at?: string | null
           status?: string
           task_attempt_id?: string | null
@@ -2604,6 +2761,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      complete_handed_off_task: {
+        Args: { p_note?: string; p_outcome: string; p_task_id: string }
+        Returns: string
+      }
+      emergency_stop_employee: {
+        Args: { p_employee_id: string; p_reason: string }
+        Returns: Json
+      }
+      hand_off_employee_task: {
+        Args: { p_assignee?: string; p_note?: string; p_task_id: string }
+        Returns: string
+      }
+      lift_emergency_stop: {
+        Args: { p_organization_id: string; p_resume_tasks?: boolean }
+        Returns: Json
+      }
       publish_workflow_version: {
         Args: {
           p_actor: string
@@ -2620,6 +2793,25 @@ export type Database = {
       change_workflow_status: {
         Args: { p_action: string; p_workflow_id: string }
         Returns: string
+      }
+      purge_expired_task_data: { Args: { p_limit?: number }; Returns: Json }
+      revoke_employee_tool: {
+        Args: { p_employee_id: string; p_integration_id?: string; p_tool_key: string }
+        Returns: number
+      }
+      set_emergency_stop: {
+        Args: { p_organization_id: string; p_reason: string }
+        Returns: Json
+      }
+      set_retention_settings: {
+        Args: {
+          p_event_days: number
+          p_evidence_days: number
+          p_hold: boolean
+          p_organization_id: string
+          p_payload_days: number
+        }
+        Returns: undefined
       }
       start_workflow_run: {
         Args: { p_idempotency_key: string; p_input: Json; p_workflow_id: string }
@@ -2785,7 +2977,9 @@ export type Database = {
           p_request_id: string
         }
         Returns: {
+          action_category: string | null
           action_summary: string
+          binding: Json
           created_at: string
           decided_at: string | null
           decided_by: string | null
@@ -2794,16 +2988,18 @@ export type Database = {
           employee_version_id: string | null
           expires_at: string
           id: string
+          kind: string
           organization_id: string
           payload_sha256: string
           policy_id: string | null
           policy_revision: number | null
           proposed_action: Json
           required_role: string
+          risk_tier: string | null
+          separate_approver: boolean
           status: string
           task_id: string
           tool_execution_id: string | null
-          kind: string
           updated_at: string
           workflow_run_id: string | null
           workflow_version_id: string | null

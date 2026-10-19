@@ -213,6 +213,7 @@ const listChannelsAction = defineAction({
   output: listOutput,
   scopes: ['channels:read'],
   risk: 'read',
+  category: 'read',
   approval: 'none',
   idempotency: { kind: 'read_only' },
   timeoutMs: 15_000,
@@ -280,6 +281,7 @@ const postMessageAction = defineAction({
   output: postOutput,
   scopes: ['chat:write'],
   risk: 'write_external',
+  category: 'external_message',
   approval: 'default_required',
   idempotency: {
     kind: 'not_idempotent',

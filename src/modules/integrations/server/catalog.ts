@@ -6,6 +6,8 @@ import 'server-only'
 
 import { z } from 'zod'
 
+import type { ActionCategory } from '@/modules/governance/domain/risk'
+
 import { CONNECTORS, findAction } from '../connectors/registry'
 import type { ApprovalRequirement, RiskLevel } from '../domain/types'
 
@@ -16,6 +18,7 @@ export interface IntegrationToolAction {
   title: string
   description: string
   risk: RiskLevel
+  category: ActionCategory
   approval: ApprovalRequirement
   scopes: readonly string[]
   /** Validates the input on the server (the same schema requestAction uses). */
@@ -41,6 +44,7 @@ export function listIntegrationToolActions(): IntegrationToolAction[] {
       title: action.title,
       description: action.description,
       risk: action.risk,
+      category: action.category,
       approval: action.approval,
       scopes: action.scopes,
       input: action.input,

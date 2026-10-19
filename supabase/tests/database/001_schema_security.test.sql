@@ -106,11 +106,12 @@ select is(
   (select array_agg(p.proname::text order by p.proname::text) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
   array['accept_invitation', 'assign_employee_task', 'cancel_employee_task', 'cancel_workflow_run', 'change_employee_status',
-    'change_workflow_status', 'create_employee', 'create_invitation', 'create_organization', 'decide_approval',
-    'employee_test_summary', 'get_invitation', 'match_knowledge_chunks', 'pause_employee_task', 'reassign_employee_task',
+    'change_workflow_status', 'complete_handed_off_task', 'create_employee', 'create_invitation', 'create_organization',
+    'decide_approval', 'emergency_stop_employee', 'employee_test_summary', 'get_invitation', 'hand_off_employee_task',
+    'lift_emergency_stop', 'match_knowledge_chunks', 'pause_employee_task', 'reassign_employee_task',
     'reply_to_employee_task', 'reprocess_knowledge_source', 'resume_employee_task', 'retry_employee_task',
-    'review_employee_test_run', 'save_employee_version', 'search_knowledge', 'set_employee_task_priority',
-    'start_workflow_run'],
+    'review_employee_test_run', 'revoke_employee_tool', 'save_employee_version', 'search_knowledge',
+    'set_emergency_stop', 'set_employee_task_priority', 'set_retention_settings', 'start_workflow_run'],
   'authenticated can call exactly the intended RPCs'
 );
 

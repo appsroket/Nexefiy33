@@ -66,6 +66,7 @@ export function summarizeConnector(connector: ConnectorDefinition, configured: b
         title: action.title,
         description: action.description,
         risk: action.risk,
+        category: action.category,
         approval: action.approval,
         defaultApprovalMode: defaultApprovalMode(action.approval),
         scopes: [...action.scopes],

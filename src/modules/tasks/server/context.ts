@@ -30,7 +30,8 @@ export interface TaskContextInput {
   organizationName: string | null
   title: string
   instructions: string | null
-  knowledge: EmployeeConfig['knowledge']
+  /** The version's knowledge access after workspace data-access policy (governance/domain/policy.ts). */
+  knowledge: EmployeeConfig['knowledge'] & { excludeSourceIds?: string[] }
   /** Retrieve knowledge for the first message (only on a task's first step). */
   prefetch: boolean
 }
@@ -73,6 +74,7 @@ export async function assembleTaskContext(
         organizationId: input.organizationId,
         query: `${input.title}\n${input.instructions ?? ''}`.slice(0, 1000),
         ...(input.knowledge.access === 'selected' ? { sourceIds: input.knowledge.sourceIds } : {}),
+        ...(input.knowledge.excludeSourceIds?.length ? { excludeSourceIds: input.knowledge.excludeSourceIds } : {}),
         limit: input.knowledge.maxPassages,
         embedder,
       })

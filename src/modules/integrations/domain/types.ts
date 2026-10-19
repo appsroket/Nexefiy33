@@ -2,6 +2,8 @@
 // client components can import it; connector definitions with their Zod
 // schemas live in ../connectors (server code).
 
+import type { ActionCategory } from '@/modules/governance/domain/risk'
+
 export const RISK_LEVELS = ['read', 'write_internal', 'write_external', 'sensitive'] as const
 export type RiskLevel = (typeof RISK_LEVELS)[number]
 
@@ -63,6 +65,7 @@ export interface ActionSummary {
   title: string
   description: string
   risk: RiskLevel
+  category: ActionCategory
   approval: ApprovalRequirement
   defaultApprovalMode: ApprovalMode
   scopes: string[]

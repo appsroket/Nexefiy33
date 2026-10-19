@@ -13,6 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { hasMinRole } from '@/lib/supabase/types'
 import { getShellContext } from '@/modules/app-shell/server/shell-context'
 import { requireWorkspace } from '@/modules/app-shell/ui/workspace-gate'
+import { handoffControls } from '@/modules/governance/domain/controls'
+import { memberNames } from '@/modules/governance/server/queries'
+import { CompleteHandoffForm, TakeOverDialog } from '@/modules/governance/ui/handoff-controls'
 import { formatUsd } from '@/modules/models/domain/catalog'
 import {
   ACTION_STATUS_LABELS,
@@ -75,9 +78,19 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       </>
     )
   }
-  const { workspace } = gate
+  const { workspace, user } = gate
   const task = await getTask(workspace.organizationId, id)
   if (!task) notFound()
+  const handoff = handoffControls({
+    status: task.status,
+    handedOffTo: task.handoff?.to ?? null,
+    handedOffAt: task.handoff?.at ?? null,
+    viewerId: user.id,
+    viewerRole: workspace.role,
+    isEmployeeTask: Boolean(task.employeeId),
+  })
+  const names = task.handoff || handoff.takeOver ? await memberNames(workspace.organizationId) : new Map<string, string>()
+  const people = [...names.entries()].map(([personId, name]) => ({ id: personId, name }))
 
   const status = TASK_STATUS_DISPLAY[task.status]
   const isOperator = hasMinRole(workspace.role, 'operator')
@@ -238,6 +251,9 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           ) : null}
           {task.cancelRequested && task.status === 'running' ? <p className="text-sm text-muted-foreground">Stopping after the current step…</p> : null}
           {task.pauseRequested && task.status === 'running' ? <p className="text-sm text-muted-foreground">Pausing after the current step…</p> : null}
+          {task.emergencyPaused && task.status === 'paused' ? (
+            <p className="text-sm text-muted-foreground">Paused by the workspace’s emergency stop. Lifting the stop can resume it.</p>
+          ) : null}
           {isOperator ? (
             <div className="flex flex-col gap-4">
               <TaskControlBar taskId={task.id} controls={controls} disclosure={{ done: disclosure.done, inProgress: disclosure.inProgress.length, withdrawn: disclosure.withdrawn }} />
@@ -266,7 +282,26 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
         </SectionCard>
       ) : null}
 
-      {task.status === 'blocked' && task.result?.escalation ? (
+      {task.handoff ? (
+        <SectionCard
+          title="A person took this task over"
+          description={`${names.get(task.handoff.to ?? '') ?? 'A member'} has it${task.handoff.by && task.handoff.by !== task.handoff.to ? ` (handed over by ${names.get(task.handoff.by) ?? 'a member'})` : ''}. The employee won’t work on it again.`}
+        >
+          <div className="flex flex-col gap-4">
+            {task.handoff.note ? <p className="max-w-3xl text-sm whitespace-pre-wrap">{task.handoff.note}</p> : null}
+            {handoff.complete ? <CompleteHandoffForm taskId={task.id} /> : null}
+          </div>
+        </SectionCard>
+      ) : handoff.takeOver ? (
+        <SectionCard
+          title={task.handoffRequestedAt ? 'The employee asked for a person' : 'Hand this task to a person'}
+          description="A person can take the task over from the employee and finish it themselves. (A running task must be paused first.)"
+        >
+          <TakeOverDialog taskId={task.id} people={people} viewerId={user.id} />
+        </SectionCard>
+      ) : null}
+
+      {task.status === 'blocked' && task.result?.escalation && !task.handoff ? (
         <SectionCard title="The employee needs your reply" description={`Reason: ${task.result.escalation.reason}`}>
           <div className="flex flex-col gap-4">
             <p className="max-w-3xl text-sm whitespace-pre-wrap">{task.result.escalation.message}</p>

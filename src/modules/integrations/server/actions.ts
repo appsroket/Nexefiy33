@@ -161,8 +161,8 @@ export async function updateActionSetting(_previous: ActionState, formData: Form
   const { organizationId, integrationId, actionKey, enabled, approvalMode } = parsed.data
   const found = findAction(actionKey)
   if (!found) return actionError(NOT_ALLOWED)
-  if (!allowedApprovalModes(found.action.approval, found.action.risk).includes(approvalMode)) {
-    return actionError('This action always needs approval; it can’t be set to run without it.')
+  if (!allowedApprovalModes(found.action.approval, found.action.risk, found.action.category).includes(approvalMode)) {
+    return actionError('This action needs approval unless a workspace policy explicitly permits it, so a connection setting can’t let it run without approval.')
   }
 
   // Runs under the user's session: RLS lets only admins change action settings.

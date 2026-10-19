@@ -2,13 +2,15 @@
 //
 //   claim (claim_employee_tasks: lease + attempt)
 //   → load the task, its pinned employee version, the checkpoint
-//   → check the employee is still active and the monthly budget
+//   → check the employee is still active, and the employee's and the
+//     workspace's monthly budgets; apply workspace policy (limits, data access)
 //   → assemble context (first step only)
 //   → runEmployee with the live invoker, saving a checkpoint, the trace
 //     (execution_events), evidence (task_evidence) and usage (usage_records)
 //     after every step, and renewing the lease
 //   → before every step: stop if the task was cancelled or paused, passed its
-//     deadline, or its employee was paused or archived
+//     deadline, its employee was paused or archived, or the workspace's
+//     emergency stop was switched on
 //   → settle: wait for approval, wait for a reply, pause, retry, fail, cancel,
 //     or verify the result against the platform's own records and finish.
 //
@@ -27,6 +29,8 @@ import { employeeConfigSchema } from '@/modules/employees/domain/schemas'
 import type { EmployeeConfig } from '@/modules/employees/domain/types'
 import { createLiveToolInvoker } from '@/modules/employees/server/live-invoker'
 import { monthlySpendMicros } from '@/modules/employees/server/playground'
+import { effectiveKnowledgeAccess, effectiveLimits } from '@/modules/governance/domain/policy'
+import { loadControls, organizationMonthlySpendMicros } from '@/modules/governance/server/state'
 import { freshCheckpoint, runEmployee, type EvidenceItem, type RunCheckpoint, type RunEvent, type RunResult } from '@/modules/employees/server/runtime'
 import type { IntegrationRuntime } from '@/modules/integrations/server/runtime'
 import type { Embedder } from '@/modules/knowledge/server/embeddings'
@@ -62,7 +66,7 @@ export interface TaskClaim {
 export type TaskRunStatus = 'succeeded' | 'failed' | 'waiting_approval' | 'blocked' | 'queued' | 'cancelled' | 'paused' | 'superseded'
 
 /** Why a run stopped before finishing, decided by the checks before each step. */
-type StopReason = 'cancel_requested' | 'pause_requested' | 'deadline_passed' | 'employee_paused' | 'employee_unavailable'
+type StopReason = 'cancel_requested' | 'pause_requested' | 'deadline_passed' | 'employee_paused' | 'employee_unavailable' | 'emergency_stop'
 
 const STOP_MESSAGES: Record<StopReason, string> = {
   cancel_requested: 'The task was cancelled.',
@@ -70,6 +74,7 @@ const STOP_MESSAGES: Record<StopReason, string> = {
   deadline_passed: 'The task passed its deadline.',
   employee_paused: 'The employee was paused, so the task paused too.',
   employee_unavailable: 'The employee was archived or removed, so the task stopped.',
+  emergency_stop: 'The workspace’s emergency stop was switched on, so the task paused.',
 }
 
 export interface TaskRunSummary {
@@ -185,7 +190,11 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
   if (!version || !parsedConfig?.success) {
     return await settleFailure(deps, claim, { code: 'invalid_configuration', class: 'permanent', message: 'The employee’s pinned version can’t be run (older configuration format).' }, null, event)
   }
-  const config: EmployeeConfig = parsedConfig.data
+  // Workspace policy can only narrow what the version allows.
+  const { controls } = await loadControls(admin, organizationId)
+  const config: EmployeeConfig = { ...parsedConfig.data, limits: effectiveLimits(parsedConfig.data.limits, controls) }
+  const knowledgeAccess = effectiveKnowledgeAccess(config.knowledge, controls)
+  const knowledge = { access: knowledgeAccess.access, sourceIds: knowledgeAccess.sourceIds, maxPassages: config.knowledge.maxPassages, excludeSourceIds: knowledgeAccess.excludeSourceIds }
 
   const { data: attempts, error: attemptsError } = await admin
     .from('task_attempts')
@@ -198,15 +207,24 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
   let checkpoint: RunCheckpoint | null = saved && saved.version === 1 ? saved : null
 
   const spent = await monthlySpendMicros(admin, organizationId, task.employee_id, now())
-  const budgetMicros = Math.round(config.budget.monthlyUsd * 1_000_000)
+  const budgetMicros = Math.round(Math.min(config.budget.monthlyUsd, controls.limits.employeeMonthlyUsd ?? Infinity) * 1_000_000)
   if (spent >= budgetMicros) {
     return await settleFailure(deps, claim, { code: 'budget_exhausted', class: 'limit', message: 'The employee has used its monthly budget.' }, null, event)
+  }
+  let remainingMicros = budgetMicros - spent
+  if (controls.limits.organizationMonthlyUsd !== undefined) {
+    const workspaceMicros = Math.round(controls.limits.organizationMonthlyUsd * 1_000_000)
+    const workspaceSpent = await organizationMonthlySpendMicros(admin, organizationId, now())
+    if (workspaceSpent >= workspaceMicros) {
+      return await settleFailure(deps, claim, { code: 'workspace_budget_exhausted', class: 'limit', message: 'The workspace has used its monthly AI budget (workspace policy).' }, null, event)
+    }
+    remainingMicros = Math.min(remainingMicros, workspaceMicros - workspaceSpent)
   }
 
   const context = await assembleTaskContext(
     admin,
     deps.embedder,
-    { organizationId, organizationName: organization?.name ?? null, title: task.title, instructions: task.instructions, knowledge: config.knowledge, prefetch: !checkpoint },
+    { organizationId, organizationName: organization?.name ?? null, title: task.title, instructions: task.instructions, knowledge, prefetch: !checkpoint },
     now(),
   )
   if (!checkpoint) {
@@ -230,7 +248,7 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
       attemptId,
       requestedBy: task.created_by,
     },
-    knowledge: config.knowledge,
+    knowledge,
     admin,
     embedder: deps.embedder,
     integrations: deps.integrations,
@@ -249,7 +267,7 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
         config,
         input: context.input,
         businessContext: context.businessContext,
-        budgetRemainingMicros: budgetMicros - spent,
+        budgetRemainingMicros: remainingMicros,
         mode: 'live',
         checkpoint,
         requiredOutputs: workflowOutputs(task.input),
@@ -290,21 +308,24 @@ async function runClaim(deps: TaskRuntimeDeps, claim: TaskClaim): Promise<TaskRu
             await recordRunEvent(admin, organizationId, taskId, attemptId, task.employee_id!, runEvent, event)
           },
           async shouldStop() {
-            const [{ data: current }, { data: currentEmployee }] = await Promise.all([
+            const [{ data: current }, { data: currentEmployee }, { data: governance }] = await Promise.all([
               admin.from('tasks').select('cancel_requested_at, pause_requested_at, deadline_at').eq('id', taskId).eq('organization_id', organizationId).maybeSingle(),
               admin.from('ai_employees').select('status').eq('id', task.employee_id!).eq('organization_id', organizationId).maybeSingle(),
+              admin.from('organization_governance').select('emergency_stop_at').eq('organization_id', organizationId).maybeSingle(),
             ])
             stopReason = current?.cancel_requested_at
               ? 'cancel_requested'
-              : current?.deadline_at && new Date(current.deadline_at) <= now()
-                ? 'deadline_passed'
-                : current?.pause_requested_at
-                  ? 'pause_requested'
-                  : currentEmployee?.status === 'paused'
-                    ? 'employee_paused'
-                    : currentEmployee?.status !== 'active'
-                      ? 'employee_unavailable'
-                      : null
+              : governance?.emergency_stop_at
+                ? 'emergency_stop'
+                : current?.deadline_at && new Date(current.deadline_at) <= now()
+                  ? 'deadline_passed'
+                  : current?.pause_requested_at
+                    ? 'pause_requested'
+                    : currentEmployee?.status === 'paused'
+                      ? 'employee_paused'
+                      : currentEmployee?.status !== 'active'
+                        ? 'employee_unavailable'
+                        : null
             return stopReason ? STOP_MESSAGES[stopReason] : false
           },
         },
@@ -540,7 +561,13 @@ async function settleFailure(
 }
 
 /** Pauses a running task; its attempt stays open and continues from the checkpoint when resumed. */
-async function settlePaused(deps: TaskRuntimeDeps, claim: TaskClaim, reason: 'pause_requested' | 'employee_paused', result: RunResult | null, event: EventWriter): Promise<TaskRunSummary> {
+async function settlePaused(
+  deps: TaskRuntimeDeps,
+  claim: TaskClaim,
+  reason: 'pause_requested' | 'employee_paused' | 'emergency_stop',
+  result: RunResult | null,
+  event: EventWriter,
+): Promise<TaskRunSummary> {
   const now = (deps.now ?? (() => new Date()))().toISOString()
   if (result) await keepAttempt(deps, claim, result)
   await updateTask(deps, claim, {
@@ -549,6 +576,8 @@ async function settlePaused(deps: TaskRuntimeDeps, claim: TaskClaim, reason: 'pa
     paused_at: now,
     pause_requested_at: null,
     lease_expires_at: null,
+    // Lifting the stop can resume exactly the tasks it paused.
+    ...(reason === 'emergency_stop' ? { emergency_paused_at: now } : {}),
     ...(result ? { result: taskResult(result, {}) } : {}),
   })
   await event('task.paused', 'info', STOP_MESSAGES[reason])
@@ -599,6 +628,8 @@ async function settle(deps: TaskRuntimeDeps, claim: TaskClaim, maxAttempts: numb
       await updateTask(deps, claim, {
         status: 'blocked',
         lease_expires_at: null,
+        // A person is needed: they can reply, or take the task over.
+        handoff_requested_at: (deps.now ?? (() => new Date()))().toISOString(),
         result: taskResult(result, { escalation: escalation?.kind === 'escalation' ? { reason: escalation.reason, message: escalation.message } : null }),
       })
       await event('task.escalated', 'warn', escalation?.kind === 'escalation' ? `Escalated: ${escalation.reason}` : 'Escalated.')
@@ -609,6 +640,7 @@ async function settle(deps: TaskRuntimeDeps, claim: TaskClaim, maxAttempts: numb
       switch (stopReason) {
         case 'pause_requested':
         case 'employee_paused':
+        case 'emergency_stop':
           return await settlePaused(deps, claim, stopReason, result, event)
         case 'deadline_passed':
           return await settleFailure(deps, claim, { code: 'deadline_passed', class: 'limit', message: 'The task didn’t finish before its deadline.' }, result, event)

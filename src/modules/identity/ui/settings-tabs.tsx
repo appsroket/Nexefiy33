@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils'
 const TABS = [
   { href: '/app/settings', label: 'General' },
   { href: '/app/settings/members', label: 'Members' },
+  { href: '/app/settings/governance', label: 'Governance' },
+  { href: '/app/settings/audit', label: 'Audit log' },
 ] as const
 
 /** Sub-navigation for workspace settings. */
@@ -15,9 +17,9 @@ export function SettingsTabs() {
   const pathname = usePathname()
   return (
     <nav aria-label="Settings sections" className="border-b">
-      <ul className="-mb-px flex gap-4">
+      <ul className="-mb-px flex gap-4 overflow-x-auto">
         {TABS.map((tab) => {
-          const current = pathname === tab.href
+          const current = pathname === tab.href || (tab.href !== '/app/settings' && pathname.startsWith(`${tab.href}/`))
           return (
             <li key={tab.href}>
               <Link

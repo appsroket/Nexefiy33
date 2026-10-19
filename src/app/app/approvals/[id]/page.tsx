@@ -11,6 +11,7 @@ import { hasMinRole } from '@/lib/supabase/types'
 import { isOrganizationRole, roleLabel } from '@/modules/app-shell/domain/workspace'
 import { getShellContext } from '@/modules/app-shell/server/shell-context'
 import { requireWorkspace } from '@/modules/app-shell/ui/workspace-gate'
+import { ACTION_CATEGORY_INFO, RISK_TIER_INFO, type ActionCategory } from '@/modules/governance/domain/risk'
 import { getApprovalRequest } from '@/modules/governance/server/approvals'
 import { ApprovalDecision } from '@/modules/governance/ui/approval-decision'
 
@@ -107,8 +108,23 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
                 <DateTime value={request.expiresAt} />
               </dd>
               <dt className="text-muted-foreground">Who can decide</dt>
-              <dd>{roleLabel(required)} or above</dd>
+              <dd>
+                {roleLabel(required)} or above{request.separateApprover ? ', not the person who requested it' : ''}
+              </dd>
+              {request.category && request.category in ACTION_CATEGORY_INFO ? (
+                <>
+                  <dt className="text-muted-foreground">Risk</dt>
+                  <dd>
+                    {ACTION_CATEGORY_INFO[request.category as ActionCategory].label} ·{' '}
+                    {RISK_TIER_INFO[ACTION_CATEGORY_INFO[request.category as ActionCategory].tier].label}
+                  </dd>
+                </>
+              ) : null}
             </dl>
+            <p className="text-sm text-muted-foreground">
+              Your approval holds only for this exact input, on this connection’s account, while you keep the role it needs and workspace policy still allows it. If any of
+              that changes before it runs, the approval is void and the action doesn’t run.
+            </p>
             <div className="flex flex-col gap-1">
               <h3 className="text-sm font-medium">Input</h3>
               <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{JSON.stringify(input ?? request.proposedAction, null, 2)}</pre>

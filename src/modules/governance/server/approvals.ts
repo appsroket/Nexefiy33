@@ -67,13 +67,17 @@ export interface ApprovalDetail extends ApprovalListItem {
   toolExecutionId: string | null
   kind: 'tool_action' | 'workflow_gate'
   workflowRunId: string | null
+  riskTier: string | null
+  category: string | null
+  /** Someone other than the requester must approve. */
+  separateApprover: boolean
 }
 
 export async function getApprovalRequest(organizationId: string, id: string): Promise<ApprovalDetail | null> {
   const supabase = await createUserClient()
   const { data, error } = await supabase
     .from('approval_requests')
-    .select('id, action_summary, status, required_role, created_at, expires_at, proposed_action, payload_sha256, decided_at, decision_note, tool_execution_id, kind, workflow_run_id')
+    .select('id, action_summary, status, required_role, created_at, expires_at, proposed_action, payload_sha256, decided_at, decision_note, tool_execution_id, kind, workflow_run_id, risk_tier, action_category, separate_approver')
     .eq('organization_id', organizationId)
     .eq('id', id)
     .maybeSingle()
@@ -96,5 +100,8 @@ export async function getApprovalRequest(organizationId: string, id: string): Pr
     toolExecutionId: data.tool_execution_id,
     kind: data.kind === 'workflow_gate' ? 'workflow_gate' : 'tool_action',
     workflowRunId: data.workflow_run_id,
+    riskTier: data.risk_tier,
+    category: data.action_category,
+    separateApprover: data.separate_approver,
   }
 }

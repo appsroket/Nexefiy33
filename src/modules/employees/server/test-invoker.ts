@@ -31,7 +31,8 @@ export interface TestInvokerOptions {
   employeeId: string
   runId: string
   actor: UserActor
-  knowledge: EmployeeConfig['knowledge']
+  /** The version's knowledge access after workspace data-access policy (governance/domain/policy.ts). */
+  knowledge: EmployeeConfig['knowledge'] & { excludeSourceIds?: string[] }
   admin: AdminClient
   embedder: Embedder | null
   /** Null when integrations aren't configured on this deployment. */
@@ -60,6 +61,7 @@ export function createTestToolInvoker(options: TestInvokerOptions): ToolInvoker 
             organizationId: options.organizationId,
             query: (parsed.data as { query: string }).query,
             ...(options.knowledge.access === 'selected' ? { sourceIds: options.knowledge.sourceIds } : {}),
+            ...(options.knowledge.excludeSourceIds?.length ? { excludeSourceIds: options.knowledge.excludeSourceIds } : {}),
             limit: options.knowledge.maxPassages,
             embedder: options.embedder,
           })

@@ -72,6 +72,29 @@ function allowAction(integrationId: string, actionKey: string) {
   ;(db.tables.integration_actions ??= []).push({ organization_id: ORG, integration_id: integrationId, action_key: actionKey, enabled: true, approval_mode: 'allow' })
 }
 
+/** A workspace policy that explicitly lets one action run without approval, last changed by `role`. */
+function permitByPolicy(actionKey: string, role: 'owner' | 'admin' | null = 'admin') {
+  ;(db.tables.organization_policies ??= []).push({
+    id: `permit-${actionKey}`,
+    organization_id: ORG,
+    name: `Permit ${actionKey}`,
+    enabled: true,
+    priority: 1,
+    revision: 3,
+    policy_schema_version: 2,
+    authorized_role: role,
+    policy: { rules: [{ effect: 'allow', toolKeys: [actionKey] }] },
+  })
+}
+
+const APPROVER = 'a0000000-0000-4000-8000-0000000000ad'
+
+/** What decide_approval records, by a member with `role`. */
+function approve(executionId: string, role = 'admin', approver = APPROVER) {
+  Object.assign(db.tables.approval_requests!.find((row) => row.tool_execution_id === executionId)!, { status: 'approved', decided_by: approver, decided_at: '2026-10-18T12:01:00Z' })
+  ;(db.tables.organization_members ??= []).push({ organization_id: ORG, user_id: approver, role, status: 'active' })
+}
+
 describe('checks before anything runs', () => {
   it('refuses unknown actions and viewers without recording anything', async () => {
     const { runtime, requests } = setup()
@@ -175,9 +198,15 @@ describe('approvals', () => {
       tool_execution_id: pending.id,
       payload_sha256: pending.input_sha256,
       required_role: 'admin',
+      separate_approver: false,
+      action_category: 'external_message',
+      risk_tier: 'high',
+      binding: { connectionAccountId: expect.any(String), approverRole: 'admin' },
       proposed_action: { action: 'slack.messages.post', input: { channel: 'C0123456789', text: 'New lead: Dana' } },
     })
-    expect(Date.parse(approval.expires_at as string) - Date.parse('2026-10-18T12:00:00Z')).toBe(72 * 3_600_000)
+    expect(pending).toMatchObject({ action_category: 'external_message', risk_tier: 'high' })
+    // A high-risk action's approval is valid for at most 48 hours.
+    expect(Date.parse(approval.expires_at as string) - Date.parse('2026-10-18T12:00:00Z')).toBe(48 * 3_600_000)
     expect(db.tables.tasks![0]!.status).toBe('waiting_approval')
   })
 
@@ -187,6 +216,7 @@ describe('approvals', () => {
     await requestAction(runtime, slackPost())
     const pending = execution()
     // What decide_approval + claim_tool_executions do in SQL (pgTAP 007).
+    approve(pending.id as string)
     Object.assign(pending, { status: 'executing', lease_expires_at: '2026-10-18T12:02:00Z' })
     db.rpcHandlers.claim_tool_executions = () => ({ data: [{ tool_execution_id: pending.id, organization_id: ORG, attempt: 1, recovered: false }], error: null })
 
@@ -220,11 +250,19 @@ describe('approvals', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('runs immediately when an admin allows the action, and blocks it when turned off or denied by policy', async () => {
+  it('runs without approval only when an authorized policy names the action, and blocks it when turned off or denied by policy', async () => {
     const { runtime, requests } = setup([[POST_URL, postOk]])
     await seedConnection(db, runtime, { provider: 'slack', scopes: SLACK_SCOPES })
+    // A connection setting alone can't waive approval for a message.
     allowAction(SLACK_ID, 'slack.messages.post')
+    expect((await requestAction(runtime, slackPost())).status).toBe('awaiting_approval')
+    // Nor can a policy last changed without an admin or owner behind it.
+    permitByPolicy('slack.messages.post', null)
+    expect((await requestAction(runtime, slackPost())).status).toBe('awaiting_approval')
+    db.tables.organization_policies = []
+    permitByPolicy('slack.messages.post', 'admin')
     expect((await requestAction(runtime, slackPost())).status).toBe('succeeded')
+    expect(execution()).toMatchObject({ policy_decision: 'allow', policy_id: 'permit-slack.messages.post' })
 
     db.tables.organization_policies = [
       { id: 'p1', organization_id: ORG, name: 'No Slack', enabled: true, priority: 1, policy: { rules: [{ effect: 'deny', toolKeys: ['slack.*'] }] } },
@@ -264,7 +302,7 @@ describe('failures and retries', () => {
   it('never resends a Slack message after a server error, but does after a 429 refusal', async () => {
     const failing = setup([[POST_URL, () => jsonResponse(500, 'oops')]])
     await seedConnection(db, failing.runtime, { provider: 'slack', scopes: SLACK_SCOPES })
-    allowAction(SLACK_ID, 'slack.messages.post')
+    permitByPolicy('slack.messages.post')
     expect(await requestAction(failing.runtime, slackPost())).toMatchObject({ status: 'failed', error: { code: 'unavailable' } })
     expect(failing.requests).toHaveLength(1)
 
@@ -283,7 +321,7 @@ describe('failures and retries', () => {
         else init.signal?.addEventListener('abort', abort)
       })
     await seedConnection(db, runtime, { provider: 'slack', scopes: SLACK_SCOPES })
-    allowAction(SLACK_ID, 'slack.messages.post')
+    permitByPolicy('slack.messages.post')
     const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort())
     try {
       expect(await requestAction(runtime, slackPost())).toMatchObject({ status: 'failed', error: { code: 'outcome_unknown' } })

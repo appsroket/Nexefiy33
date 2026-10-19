@@ -2,6 +2,24 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 14 (2026-10-19)
+
+### Implemented and verified
+- **Governance layer** (ADR-029): risk categories and tiers on every action; consequential actions need approval unless a policy saved by an authorized role names them; policy documents v2 (rules by action, category, tier, employee and actor; approver role, separate approver, expiry; tool allowlists; data access; runtime, cost and spending limits) with immutable versions; approvals that only a signed-in member with the required role can grant (never the service role, never the requester when a separate approver is required) and that are voided before running if the account, the approver's role or policy changed; workspace and employee emergency stops; tool revocation and disconnection cancel waiting actions; human handoff; audit entries for governance and AI actions with an admin audit log page; evidence retention with a hold and `/api/cron/governance`.
+- **Tests:** pgTAP 013 (110 checks, every control called directly as each role, the service role and another workspace); 9 database integration tests in `tests/integration/governance.test.ts` (approval integrity, invalidation, authorized allow, revocation, workspace and employee stop, data access, workspace budget, handoff); unit tests for the policy engine, risk catalog, schemas and Server Actions; pgTAP 001–013 (695) and 31 integration tests pass on local PostgreSQL 16; the policy editor and stop dialog driven in Chromium with stubbed Server Actions.
+
+### Not verified yet
+- **Migration `governance_controls` is not applied to the dev project** (nor the six before it). Nothing in this phase has run against Supabase, a live model, HubSpot or Slack.
+- The governance pages were not opened signed in; only the client components were rendered in a harness.
+
+### Limitations
+- Financial, personnel and destructive categories have no connector, so their rules have nothing to govern yet.
+- Connection settings of "allow" on consequential actions are now ignored (treated as "needs approval") until an admin writes a policy naming the action; existing settings aren't migrated or flagged on the page beyond the effective value shown.
+- An action already running at a provider when a stop, revocation or invalidation happens can't be recalled.
+- Policy "conditions" (v1) are still not evaluated; v2 has no amount thresholds, recipient allowlists or time windows.
+- No notifications when a stop is set or an approval is voided; no policy simulation; audit log has no export; retention purge needs a cron schedule (`vercel.json` doesn't exist).
+- A separate approver is checked against the action's requester only (for employee tasks, the person who assigned the task).
+
 ## As of Phase 13 (2026-10-19)
 
 ### Implemented and verified

@@ -20,6 +20,8 @@ export const INTEGRATION_ERROR_CODES = [
   'outcome_unknown',
   'action_disabled',
   'denied_by_policy',
+  'emergency_stop',
+  'approval_invalidated',
 ] as const
 
 export type IntegrationErrorCode = (typeof INTEGRATION_ERROR_CODES)[number]
@@ -50,6 +52,8 @@ export const ERROR_CODE_INFO: Record<IntegrationErrorCode, CodeInfo> = {
   },
   action_disabled: { retryable: false, message: 'This action is turned off for this connection.' },
   denied_by_policy: { retryable: false, message: 'A workspace policy blocks this action.' },
+  emergency_stop: { retryable: false, message: 'The emergency stop is on in this workspace, so AI work takes no actions.' },
+  approval_invalidated: { retryable: false, message: 'Something material changed after this action was approved, so the approval no longer holds. Ask for approval again.' },
 }
 
 /** Stored in tool_executions.error and returned to callers; contains no secrets. */

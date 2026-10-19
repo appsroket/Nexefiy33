@@ -19,7 +19,8 @@
 import 'server-only'
 
 import type { AdminClient } from '@/lib/supabase/admin'
-import { evaluatePolicies, type PolicyRule, type StoredPolicy } from '@/modules/integrations/domain/policy'
+import { evaluatePolicies, type StoredPolicy } from '@/modules/governance/domain/policy'
+import { loadActivePolicies } from '@/modules/governance/server/state'
 import { previewActionDecision } from '@/modules/integrations/server/executor'
 import type { IntegrationRuntime } from '@/modules/integrations/server/runtime'
 
@@ -48,12 +49,11 @@ export interface ActivationCheck {
 }
 
 async function loadPolicies(admin: AdminClient, organizationId: string): Promise<StoredPolicy[]> {
-  const { data, error } = await admin.from('organization_policies').select('id, name, policy').eq('organization_id', organizationId).eq('enabled', true).order('priority')
-  if (error) throw new Error('Workspace policies couldn’t be loaded.')
-  return (data ?? []).map((row) => {
-    const document = (row.policy ?? {}) as { rules?: PolicyRule[] }
-    return { id: row.id, name: row.name, rules: Array.isArray(document.rules) ? document.rules : [] }
-  })
+  try {
+    return await loadActivePolicies(admin, organizationId)
+  } catch {
+    throw new Error('Workspace policies couldn’t be loaded.')
+  }
 }
 
 export async function checkForActivation(
@@ -109,7 +109,7 @@ export async function checkForActivation(
   const policies = await loadPolicies(deps.admin, deps.organizationId)
   const handoffLines: ActivationCheck['report']['handoffs'] = []
   for (const { from, to } of handoffs(definition)) {
-    const match = evaluatePolicies(policies, { toolKey: HANDOFF_POLICY_KEY, risk: 'write_internal', employeeId: to.config.employeeId })
+    const match = evaluatePolicies(policies, { toolKey: HANDOFF_POLICY_KEY, risk: 'write_internal', category: 'internal_update', actor: 'workflow', employeeId: to.config.employeeId })
     const decision = match?.effect ?? 'allow'
     handoffLines.push({ from: from.id, to: to.id, decision })
     if (decision === 'deny') {

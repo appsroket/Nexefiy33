@@ -1,15 +1,23 @@
 // Decides whether an integration action may run, needs approval, or is
-// blocked. Pure. Inputs come from trusted server state: the connector's
-// declared requirement (code), the connection's action setting (admins), and
-// organization policies — never from a model or the browser.
+// blocked, and on what terms an approval is valid. Pure. Inputs come from
+// trusted server state: the connector's declared requirement and category
+// (code), the connection's action setting (admins), and workspace policies —
+// never from a model or the browser.
 //
-// The result is the most restrictive of all applicable rules, so a policy can
-// only make an action stricter than the connection setting, and an action
-// declared "always needs approval" can never be relaxed.
+// The result is the most restrictive of all applicable rules, with one
+// exception: a consequential action (see governance/domain/risk.ts) needs
+// approval unless a policy explicitly permits it — an "allow" rule naming the
+// action exactly, last changed by a role allowed to authorize its risk tier.
+// A connection setting alone can't waive approval for a consequential action,
+// and an action declared "always needs approval" can never be relaxed.
 
 import type { OrganizationRole } from '@/lib/supabase/types'
+import { allowlistBlocking, combineControls, evaluateRules, type PolicyActor, type StoredPolicy } from '@/modules/governance/domain/policy'
+import { higherRole, isConsequential, RISK_TIER_INFO, tierOf, type ActionCategory, type ApproverRole, type RiskTier } from '@/modules/governance/domain/risk'
 
 import type { ApprovalMode, ApprovalRequirement, RiskLevel } from './types'
+
+export { evaluatePolicies, ruleApplies, type PolicyRule, type StoredPolicy } from '@/modules/governance/domain/policy'
 
 const RANK: Record<ApprovalMode, number> = { allow: 0, require_approval: 1, deny: 2 }
 
@@ -21,112 +29,94 @@ export function defaultApprovalMode(requirement: ApprovalRequirement): ApprovalM
   return requirement === 'none' ? 'allow' : 'require_approval'
 }
 
-/** Approval modes an admin may choose for an action with this requirement. */
-export function allowedApprovalModes(requirement: ApprovalRequirement, risk: RiskLevel): ApprovalMode[] {
-  return requirement === 'always' || risk === 'sensitive' ? ['require_approval', 'deny'] : ['allow', 'require_approval', 'deny']
+/** Approval modes an admin may choose on a connection. Consequential actions can't be set to run without approval there. */
+export function allowedApprovalModes(requirement: ApprovalRequirement, risk: RiskLevel, category: ActionCategory): ApprovalMode[] {
+  return requirement === 'always' || risk === 'sensitive' || isConsequential(category) ? ['require_approval', 'deny'] : ['allow', 'require_approval', 'deny']
 }
 
-/** One rule of an organization policy document (schema version 1). */
-export interface PolicyRule {
-  id?: string
-  effect: ApprovalMode
-  toolKeys?: string[]
-  riskLevels?: RiskLevel[]
-  employeeIds?: string[]
-  conditions?: Record<string, unknown>
-}
-
-export interface PolicyContext {
-  toolKey: string
-  risk: RiskLevel
-  employeeId?: string | null
-}
-
-function toolKeyMatches(pattern: string, toolKey: string): boolean {
-  if (pattern === '*') return true
-  if (pattern.endsWith('.*')) return toolKey.startsWith(pattern.slice(0, -1))
-  return pattern === toolKey
-}
-
-/**
- * Whether a rule applies. Conditions aren't evaluated yet, so a rule with
- * conditions is treated as applying: that can only make an action stricter
- * when its effect is stricter, and it is never used to allow (fail closed).
- */
-export function ruleApplies(rule: PolicyRule, context: PolicyContext): boolean {
-  if (rule.toolKeys?.length && !rule.toolKeys.some((pattern) => toolKeyMatches(pattern, context.toolKey))) return false
-  if (rule.riskLevels?.length && !rule.riskLevels.includes(context.risk)) return false
-  if (rule.employeeIds?.length && !(context.employeeId && rule.employeeIds.includes(context.employeeId))) return false
-  return true
-}
-
-export interface PolicyMatch {
-  effect: ApprovalMode
-  policyId: string
-  ruleId?: string
-}
-
-export interface StoredPolicy {
-  id: string
-  name: string
-  rules: PolicyRule[]
-}
-
-/** The strictest applicable rule across enabled policies, or null when none applies. */
-export function evaluatePolicies(policies: readonly StoredPolicy[], context: PolicyContext): (PolicyMatch & { policyName: string }) | null {
-  let strictest: (PolicyMatch & { policyName: string }) | null = null
-  for (const policy of policies) {
-    for (const rule of policy.rules) {
-      if (!ruleApplies(rule, context)) continue
-      const hasConditions = rule.conditions && Object.keys(rule.conditions).length > 0
-      if (hasConditions && rule.effect === 'allow') continue
-      if (!strictest || RANK[rule.effect] > RANK[strictest.effect]) {
-        strictest = { effect: rule.effect, policyId: policy.id, policyName: policy.name, ...(rule.id ? { ruleId: rule.id } : {}) }
-      }
-    }
-  }
-  return strictest
+/** Minimum role that may approve an action of this (connector) risk level. */
+export function approverRoleFor(risk: RiskLevel): ApproverRole {
+  return risk === 'write_external' || risk === 'sensitive' ? 'admin' : 'operator'
 }
 
 export interface ActionDecisionInput {
+  toolKey: string
   requirement: ApprovalRequirement
   risk: RiskLevel
+  category: ActionCategory
   /** The connection's setting for this action, or null when none is stored. */
   connectionMode: ApprovalMode | null
   enabled: boolean
-  policy: (PolicyMatch & { policyName: string }) | null
+  /** Enabled workspace policies, in priority order. */
+  policies: readonly StoredPolicy[]
+  actor: PolicyActor
+  employeeId?: string | null
 }
 
 export interface ActionDecision {
   decision: ApprovalMode
   reason: string
   policyId: string | null
+  policyRevision: number | null
+  category: ActionCategory
+  tier: RiskTier
+  /** Terms for an approval, when one is needed. */
+  approverRole: ApproverRole
+  separateApprover: boolean
+  approvalHours: number
 }
 
 export function decideAction(input: ActionDecisionInput): ActionDecision {
-  if (!input.enabled) return { decision: 'deny', reason: 'This action is turned off for the connection.', policyId: null }
+  const tier = tierOf(input.category)
+  const tierInfo = RISK_TIER_INFO[tier]
+  const controls = combineControls(input.policies)
+  const outcome = evaluateRules(input.policies, { toolKey: input.toolKey, risk: input.risk, category: input.category, actor: input.actor, employeeId: input.employeeId ?? null })
 
-  const declared = defaultApprovalMode(input.requirement)
-  let base = input.connectionMode ?? declared
-  let reason = input.connectionMode ? 'Connection setting for this action.' : 'Default for this action.'
-  if ((input.requirement === 'always' || input.risk === 'sensitive') && base === 'allow') {
-    base = 'require_approval'
-    reason = 'This action always needs approval.'
+  const terms = {
+    category: input.category,
+    tier,
+    approverRole: higherRole(higherRole(tierInfo.approverRole, approverRoleFor(input.risk)), outcome.approverRole ?? 'operator'),
+    separateApprover: tierInfo.separateApprover || controls.approvals.separateApprover || outcome.separateApprover,
+    approvalHours: Math.min(tierInfo.maxApprovalHours, controls.approvals.expiresInHours ?? Infinity, outcome.approvalHours ?? Infinity),
   }
+  const result = (decision: ApprovalMode, reason: string, policy: { policyId: string; policyRevision: number } | null = null): ActionDecision => ({
+    decision,
+    reason,
+    policyId: policy?.policyId ?? null,
+    policyRevision: policy?.policyRevision ?? null,
+    ...terms,
+  })
 
-  if (input.policy && RANK[input.policy.effect] > RANK[base]) {
-    return {
-      decision: input.policy.effect,
-      reason: `Workspace policy “${input.policy.policyName}”.`,
-      policyId: input.policy.policyId,
+  if (!input.enabled) return result('deny', 'This action is turned off for the connection.')
+  if (input.actor !== 'person') {
+    const blocking = allowlistBlocking(controls, input.toolKey)
+    if (blocking) {
+      const policy = input.policies.find((item) => item.name === blocking)
+      return result('deny', `Workspace policy “${blocking}” doesn’t list this tool for AI work.`, policy ? { policyId: policy.id, policyRevision: policy.revision } : null)
     }
   }
-  return { decision: base, reason, policyId: null }
-}
 
-/** Minimum role that may approve an action of this risk level. */
-export function approverRoleFor(risk: RiskLevel): Exclude<OrganizationRole, 'viewer'> {
-  return risk === 'write_external' || risk === 'sensitive' ? 'admin' : 'operator'
+  let base = input.connectionMode ?? defaultApprovalMode(input.requirement)
+  let reason = input.connectionMode ? 'Connection setting for this action.' : 'Default for this action.'
+  const neverWaived = input.requirement === 'always' || input.risk === 'sensitive'
+  if (neverWaived && base === 'allow') {
+    base = 'require_approval'
+    reason = 'This action always needs approval.'
+  } else if (isConsequential(input.category) && base === 'allow') {
+    base = 'require_approval'
+    reason = `${tierInfo.label}-risk actions need approval unless a workspace policy explicitly permits them.`
+  }
+
+  if (outcome.restriction && RANK[outcome.restriction.effect] >= RANK[base]) {
+    return result(outcome.restriction.effect, `Workspace policy “${outcome.restriction.policyName}”.`, outcome.restriction)
+  }
+  if (base === 'require_approval' && !outcome.restriction && outcome.authorizedAllow && !neverWaived) {
+    return result('allow', `Workspace policy “${outcome.authorizedAllow.policyName}” permits this action without approval.`, outcome.authorizedAllow)
+  }
+  if (base === 'require_approval' && outcome.unauthorizedAllow && !neverWaived) {
+    return result(base, `${reason} Policy “${outcome.unauthorizedAllow.policyName}” can’t waive it: ${outcome.unauthorizedAllow.reason}.`)
+  }
+  return result(base, reason)
 }
 
 /** Minimum role that may ask for an action to run (it may still need approval). */

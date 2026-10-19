@@ -120,7 +120,9 @@ describe('the executor with an employee as the actor', () => {
     const waiting = await requestAction(runtime, request({ actionKey: 'hubspot.contacts.upsert', input: { email: 'dana@example.com', firstName: 'Dana' }, idempotencyKey: `task:${TASK}:call-3` }))
     expect(waiting.status).toBe('awaiting_approval')
     const execution = db.tables.tool_executions![0]!
-    db.tables.approval_requests![0]!.status = 'approved'
+    // Approved by an admin (what decide_approval records).
+    Object.assign(db.tables.approval_requests![0]!, { status: 'approved', decided_by: 'a0000000-0000-4000-8000-0000000000ad', decided_at: '2026-10-18T12:01:00Z' })
+    ;(db.tables.organization_members ??= []).push({ organization_id: ORG, user_id: 'a0000000-0000-4000-8000-0000000000ad', role: 'admin', status: 'active' })
     db.tables.tasks![0]!.status = 'waiting_approval'
 
     // The employee was paused in the meantime: the approved action doesn't run.

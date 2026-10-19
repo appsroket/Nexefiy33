@@ -6,6 +6,8 @@
 // (with limits) is in ./schemas.ts and the database validates the same shape
 // (private.employee_config_is_valid, schema version 2).
 
+import type { ActionCategory } from '@/modules/governance/domain/risk'
+
 export const DEPARTMENTS = [
   'sales',
   'support',
@@ -144,6 +146,8 @@ export interface EmployeeToolInfo {
   provider: 'knowledge' | 'hubspot' | 'slack'
   providerName: string
   risk: 'read' | 'write_internal' | 'write_external' | 'sensitive'
+  /** What the tool does in the world; fixes its risk tier (governance/domain/risk.ts). */
+  category: ActionCategory
   /** The tool's own approval requirement (declared by its connector). */
   approvalRequirement: 'none' | 'default_required' | 'always'
   needsConnection: boolean

@@ -9,6 +9,7 @@
 import type { z } from 'zod'
 
 import type { OptionalFeatureKey } from '@/lib/env/catalog'
+import type { ActionCategory } from '@/modules/governance/domain/risk'
 
 import type { IntegrationError } from '../domain/errors'
 import type {
@@ -118,6 +119,8 @@ export interface ActionDefinition<I = unknown, O = unknown> {
   output: z.ZodType<O>
   scopes: readonly string[]
   risk: RiskLevel
+  /** What the action does in the world; fixes its risk tier (governance/domain/risk.ts). */
+  category: ActionCategory
   approval: ApprovalRequirement
   idempotency: IdempotencyStrategy
   /** Per-attempt time limit for the whole action. */

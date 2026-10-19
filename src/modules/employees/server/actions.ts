@@ -22,6 +22,7 @@ import { createRateLimiter } from '@/lib/rate-limit'
 import { getAdminClient } from '@/lib/supabase/admin'
 import { createUserClient } from '@/lib/supabase/server'
 import { hasMinRole, type Json, type OrganizationRole } from '@/lib/supabase/types'
+import { activationPolicyIssues, combineControls, storedPolicyFromRow } from '@/modules/governance/domain/policy'
 import { SESSION_ENDED_MESSAGE } from '@/modules/identity/server/session'
 import { getVerifiedMember } from '@/modules/integrations/server/membership'
 import { getIntegrationRuntime } from '@/modules/integrations/server/runtime'
@@ -202,6 +203,7 @@ const STATUS_ERRORS: Record<string, string> = {
   '22023': 'Type the employee’s name exactly to confirm.',
   '23514': 'The version’s tests haven’t all passed. Run them in the playground first.',
   '23503': 'A connection this version uses no longer exists. Edit the employee and choose another.',
+  '42501': 'A tool this version uses isn’t allowed by workspace policy.',
 }
 
 export async function changeEmployeeStatus(
@@ -236,6 +238,16 @@ export async function changeEmployeeStatus(
     if (!config?.success) return actionError('This version can’t be activated: save it again in the editor first.')
     const blockers = activationBlockers(config.data, { tools: listEmployeeTools(), ...(await loadEditorOptions(org)) })
     if (blockers.length) return actionError(`Fix these before activating: ${blockers.map((issue) => issue.message).join(' ')}`)
+    // Workspace policy (members can read it); the database refuses grants outside an allowlist too.
+    const { data: policies, error: policyError } = await supabase
+      .from('organization_policies')
+      .select('id, name, revision, policy_schema_version, authorized_role, policy')
+      .eq('organization_id', org)
+      .eq('enabled', true)
+      .order('priority')
+    if (policyError) return actionError('Workspace policies couldn’t be loaded. Please try again.')
+    const policyIssues = activationPolicyIssues(config.data, combineControls((policies ?? []).map(storedPolicyFromRow)))
+    if (policyIssues.length) return actionError(`Workspace policy blocks this version: ${policyIssues.join(' ')}`)
   }
 
   const { error } = await supabase.rpc('change_employee_status', {

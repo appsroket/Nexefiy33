@@ -307,6 +307,12 @@ export interface TaskDetail {
   pausedAt: string | null
   cancelRequested: boolean
   pauseRequested: boolean
+  /** The employee escalated and a person is needed. */
+  handoffRequestedAt: string | null
+  /** A person took the task over (it never returns to the employee). */
+  handoff: { to: string | null; by: string | null; at: string; note: string | null } | null
+  /** Paused by the workspace's emergency stop. */
+  emergencyPaused: boolean
   attemptCount: number
   maxAttempts: number
   result: TaskResultView | null
@@ -330,7 +336,7 @@ export async function getTask(organizationId: string, taskId: string, now = new 
   const { data: task, error } = await supabase
     .from('tasks')
     .select(
-      'id, title, instructions, status, priority, source, employee_id, employee_version_id, workflow_run_id, created_at, started_at, completed_at, deadline_at, paused_at, cancel_requested_at, pause_requested_at, attempt_count, max_attempts, result, error',
+      'id, title, instructions, status, priority, source, employee_id, employee_version_id, workflow_run_id, created_at, started_at, completed_at, deadline_at, paused_at, cancel_requested_at, pause_requested_at, attempt_count, max_attempts, result, error, handoff_requested_at, handed_off_to, handed_off_by, handed_off_at, handoff_note, emergency_paused_at',
     )
     .eq('id', taskId)
     .eq('organization_id', organizationId)
@@ -436,6 +442,9 @@ export async function getTask(organizationId: string, taskId: string, now = new 
     pausedAt: task.paused_at,
     cancelRequested: Boolean(task.cancel_requested_at),
     pauseRequested: Boolean(task.pause_requested_at),
+    handoffRequestedAt: task.handoff_requested_at,
+    handoff: task.handed_off_at ? { to: task.handed_off_to, by: task.handed_off_by, at: task.handed_off_at, note: task.handoff_note } : null,
+    emergencyPaused: Boolean(task.emergency_paused_at),
     attemptCount: task.attempt_count,
     maxAttempts: task.max_attempts,
     result: (task.result ?? null) as TaskResultView | null,

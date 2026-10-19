@@ -43,11 +43,30 @@ export async function retrieveKnowledge(
     organizationId,
     query,
     sourceIds,
+    excludeSourceIds,
     limit = DEFAULT_MATCH_COUNT,
     embedder,
-  }: { organizationId: string; query: string; sourceIds?: string[]; limit?: number; embedder: Embedder | null },
+  }: {
+    organizationId: string
+    query: string
+    sourceIds?: string[]
+    /** Sources never searched (workspace data-access policy); applied before the search, never after. */
+    excludeSourceIds?: string[]
+    limit?: number
+    embedder: Embedder | null
+  },
 ): Promise<EvidenceResult> {
   const text = query.trim().slice(0, 1000)
+  let allowed = sourceIds?.length ? sourceIds : undefined
+  if (excludeSourceIds?.length) {
+    if (!allowed) {
+      const { data: sources, error: sourcesError } = await client.from('knowledge_sources').select('id').eq('organization_id', organizationId).eq('status', 'ready')
+      if (sourcesError) throw new RetrievalError('Knowledge search is unavailable right now. Please try again.')
+      allowed = (sources ?? []).map((source) => source.id)
+    }
+    allowed = allowed.filter((id) => !excludeSourceIds.includes(id))
+    if (!allowed.length) return { query: text, verdict: assessEvidence(text, []), passages: [], semantic: false }
+  }
   let embedding: string | undefined
   if (embedder && text) {
     try {
@@ -63,7 +82,7 @@ export async function retrieveKnowledge(
     p_query: text,
     ...(embedding ? { p_query_embedding: embedding } : {}),
     p_match_count: limit,
-    ...(sourceIds?.length ? { p_source_ids: sourceIds } : {}),
+    ...(allowed?.length ? { p_source_ids: allowed } : {}),
   })
   if (error) {
     console.error('[knowledge] search failed', { code: error.code })

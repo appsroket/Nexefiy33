@@ -130,7 +130,7 @@ describe('updateActionSetting', () => {
   const save = (values: Record<string, string>) =>
     actions.updateActionSetting(
       { status: 'idle' },
-      form({ organizationId: ORG, integrationId: SLACK_ID, actionKey: 'slack.messages.post', enabled: 'on', approvalMode: 'allow', ...values }),
+      form({ organizationId: ORG, integrationId: SLACK_ID, actionKey: 'slack.messages.post', enabled: 'on', approvalMode: 'require_approval', ...values }),
     )
 
   it('lets only admins change settings, for actions of the connection’s provider', async () => {
@@ -140,13 +140,15 @@ describe('updateActionSetting', () => {
     db.tables.integrations = [{ id: SLACK_ID, organization_id: ORG, provider: 'slack' }]
     expect(await save({ actionKey: 'hubspot.contacts.search' })).toMatchObject({ status: 'error' })
     expect(await save({ approvalMode: 'sometimes' })).toMatchObject({ status: 'error' })
+    // Sending a message is consequential: only a workspace policy can let it run without approval.
+    expect(await save({ approvalMode: 'allow' })).toMatchObject({ status: 'error', message: expect.stringContaining('workspace policy') })
   })
 
   it('saves the setting scoped to the workspace and connection', async () => {
     db.tables.integrations = [{ id: SLACK_ID, organization_id: ORG, provider: 'slack' }]
     db.tables.integration_actions = [{ organization_id: ORG, integration_id: SLACK_ID, action_key: 'slack.messages.post', enabled: true, approval_mode: 'require_approval' }]
-    expect(await save({})).toMatchObject({ status: 'success' })
-    expect(db.tables.integration_actions[0]).toMatchObject({ approval_mode: 'allow', enabled: true })
+    expect(await save({ approvalMode: 'deny' })).toMatchObject({ status: 'success' })
+    expect(db.tables.integration_actions[0]).toMatchObject({ approval_mode: 'deny', enabled: true })
     expect(db.queries.at(-1)!.filters).toEqual([
       ['integration_id', 'eq', SLACK_ID],
       ['organization_id', 'eq', ORG],

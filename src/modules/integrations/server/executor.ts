@@ -5,13 +5,17 @@
 //  3. the connection belongs to the caller's organization, is connected, is
 //     for the action's provider, and was granted the action's scopes;
 //  4. the action is enabled and the decision (connection setting, declared
-//     requirement, organization policies) is allow / require_approval / deny;
+//     requirement and category, workspace policies and allowlists) is
+//     allow / require_approval / deny; AI work (employees, workflows) takes
+//     no action while the workspace's emergency stop is on;
 //  5. the attempt is recorded (task + tool execution) under the caller's
 //     idempotency key, so a repeated request returns the first result;
 //  6. allowed actions run now; others wait for approval or are refused.
 //
-// Running re-checks the connection, scopes, setting and input fingerprint, so
-// an approval never outlives a disconnection or a changed payload. Provider
+// Running re-checks the connection, scopes, setting, policies, emergency stop
+// and input fingerprint, and what the approval was bound to (the connected
+// account, the approver's role, a separate approver), so an approval never
+// outlives a disconnection, a changed payload or a stricter policy. Provider
 // calls get a per-attempt deadline, shared rate limits, and retries only when
 // the action's idempotency strategy makes a repeat safe.
 //
@@ -28,7 +32,11 @@ import { hasMinRole, type Json, type OrganizationRole } from '@/lib/supabase/typ
 import { findAction } from '../connectors/registry'
 import type { ActionDefinition, ConnectorDefinition } from '../connectors/types'
 import { IntegrationError, isIntegrationError, needsReconnect, type NormalizedError } from '../domain/errors'
-import { approverRoleFor, decideAction, evaluatePolicies, MIN_ROLE_TO_RUN_ACTIONS, mostRestrictive, type PolicyRule, type StoredPolicy } from '../domain/policy'
+import type { PolicyActor } from '@/modules/governance/domain/policy'
+import { isConsequential, roleAtLeast } from '@/modules/governance/domain/risk'
+import { GovernanceUnavailableError, loadActivePolicies, loadEmergencyStop } from '@/modules/governance/server/state'
+
+import { decideAction, MIN_ROLE_TO_RUN_ACTIONS, mostRestrictive, type ActionDecision } from '../domain/policy'
 import { decideRetry } from '../domain/retry'
 import type { ApprovalMode } from '../domain/types'
 import { getAccessToken, markNeedsReauth } from './credentials'
@@ -37,7 +45,6 @@ import { createRateLimitGate } from './rate-limit'
 import type { IntegrationRuntime } from './runtime'
 
 const EXECUTION_LEASE_MS = 120_000
-const DEFAULT_APPROVAL_HOURS = 72
 
 export interface UserActor {
   kind: 'user'
@@ -174,36 +181,67 @@ async function loadSetting(runtime: IntegrationRuntime, organizationId: string, 
   return { enabled: data?.enabled ?? true, approvalMode: (data?.approval_mode as ApprovalMode | undefined) ?? null }
 }
 
-async function loadPolicies(runtime: IntegrationRuntime, organizationId: string): Promise<{ policies: StoredPolicy[]; approvalHours: number }> {
-  const { data, error } = await runtime.admin
-    .from('organization_policies')
-    .select('id, name, policy')
-    .eq('organization_id', organizationId)
-    .eq('enabled', true)
-    .order('priority')
-  if (error) throw new IntegrationError('unavailable', { message: 'Workspace policies couldn’t be loaded.', mayHaveReachedProvider: false })
-  let approvalHours = DEFAULT_APPROVAL_HOURS
-  const policies = (data ?? []).map((row) => {
-    const document = (row.policy ?? {}) as { rules?: PolicyRule[]; defaults?: { approvalExpiresInHours?: number } }
-    if (typeof document.defaults?.approvalExpiresInHours === 'number') approvalHours = Math.min(approvalHours, document.defaults.approvalExpiresInHours)
-    return { id: row.id, name: row.name, rules: Array.isArray(document.rules) ? document.rules : [] }
-  })
-  return { policies, approvalHours }
+async function governed<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return await load()
+  } catch (error) {
+    if (error instanceof GovernanceUnavailableError) throw new IntegrationError('unavailable', { message: error.message, mayHaveReachedProvider: false })
+    throw error
+  }
 }
 
-async function decide(runtime: IntegrationRuntime, organizationId: string, integrationId: string, action: ActionDefinition, employeeId?: string | null) {
-  const [setting, { policies, approvalHours }] = await Promise.all([
+async function decide(
+  runtime: IntegrationRuntime,
+  organizationId: string,
+  integrationId: string,
+  action: ActionDefinition,
+  actor: PolicyActor,
+  employeeId?: string | null,
+): Promise<ActionDecision & { policyRevisions: { id: string; revision: number }[] }> {
+  const [setting, policies] = await Promise.all([
     loadSetting(runtime, organizationId, integrationId, action.key),
-    loadPolicies(runtime, organizationId),
+    governed(() => loadActivePolicies(runtime.admin, organizationId)),
   ])
   const decision = decideAction({
+    toolKey: action.key,
     requirement: action.approval,
     risk: action.risk,
+    category: action.category,
     connectionMode: setting.approvalMode,
     enabled: setting.enabled,
-    policy: evaluatePolicies(policies, { toolKey: action.key, risk: action.risk, ...(employeeId ? { employeeId } : {}) }),
+    policies,
+    actor,
+    employeeId: employeeId ?? null,
   })
-  return { ...decision, approvalHours }
+  return { ...decision, policyRevisions: policies.map((policy) => ({ id: policy.id, revision: policy.revision })) }
+}
+
+/** AI work takes no action while the workspace's emergency stop is on. */
+async function emergencyStopError(runtime: IntegrationRuntime, organizationId: string): Promise<IntegrationError | null> {
+  const stop = await governed(() => loadEmergencyStop(runtime.admin, organizationId))
+  return stop ? new IntegrationError('emergency_stop', { message: `The emergency stop is on in this workspace (${stop.reason}), so AI work takes no actions.` }) : null
+}
+
+/**
+ * Audit entry for an AI or consequential action: who acted, what, and the
+ * decision — references and labels only, never the payload.
+ */
+async function auditAction(
+  runtime: IntegrationRuntime,
+  organizationId: string,
+  entry: { action: string; executionId: string; toolKey: string; employeeId: string | null; userId: string | null; metadata: Record<string, unknown> },
+) {
+  const { error } = await runtime.admin.from('audit_logs').insert({
+    organization_id: organizationId,
+    actor_type: entry.employeeId ? 'employee' : entry.userId ? 'user' : 'system',
+    actor_employee_id: entry.employeeId,
+    actor_user_id: entry.userId,
+    action: entry.action,
+    target_table: 'tool_executions',
+    target_id: entry.executionId,
+    metadata: redact({ tool_key: entry.toolKey, ...entry.metadata }) as Json,
+  })
+  if (error) console.error('[integrations] writing an audit entry failed', redact({ code: error.code }))
 }
 
 /** Applies a floor (the employee's grant, a caller's rule): it may add approval, never remove it. */
@@ -316,7 +354,7 @@ export type DecisionPreview =
  */
 export async function previewActionDecision(
   runtime: IntegrationRuntime,
-  request: { organizationId: string; integrationId: string; actionKey: string; employeeId?: string },
+  request: { organizationId: string; integrationId: string; actionKey: string; employeeId?: string; actor?: PolicyActor },
 ): Promise<DecisionPreview> {
   const found = findAction(request.actionKey)
   if (!found) return { status: 'refused', error: new IntegrationError('invalid_input', { message: 'Unknown action.' }).toJSON() }
@@ -325,17 +363,8 @@ export async function previewActionDecision(
     const connection = await loadConnection(runtime, request.organizationId, request.integrationId)
     const problem = checkConnection(connection, connector, action)
     if (problem) return { status: 'refused', error: problem.toJSON() }
-    const [setting, { policies }] = await Promise.all([
-      loadSetting(runtime, request.organizationId, request.integrationId, action.key),
-      loadPolicies(runtime, request.organizationId),
-    ])
-    const decision = decideAction({
-      requirement: action.approval,
-      risk: action.risk,
-      connectionMode: setting.approvalMode,
-      enabled: setting.enabled,
-      policy: evaluatePolicies(policies, { toolKey: action.key, risk: action.risk, ...(request.employeeId ? { employeeId: request.employeeId } : {}) }),
-    })
+    const actor = request.actor ?? (request.employeeId ? 'employee' : 'workflow')
+    const decision = await decide(runtime, request.organizationId, request.integrationId, action, actor, request.employeeId)
     return { status: 'ok', decision: decision.decision, reason: decision.reason }
   } catch (error) {
     if (isIntegrationError(error)) return { status: 'refused', error: error.toJSON() }
@@ -376,9 +405,13 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
       const problem = await checkWorkflowActor(runtime, request, actor)
       if (problem) return refused(problem)
     }
+    if (actor.kind !== 'user') {
+      const stopped = await emergencyStopError(runtime, request.organizationId)
+      if (stopped) return refused(stopped)
+    }
 
     const employeeId = actor.kind === 'employee' ? actor.employeeId : null
-    let decision = await decide(runtime, request.organizationId, request.integrationId, action, employeeId)
+    let decision = await decide(runtime, request.organizationId, request.integrationId, action, actor.kind === 'user' ? 'person' : actor.kind, employeeId)
     decision = withFloor(decision, grantFloor, 'The employee’s permission for this action.')
     decision = withFloor(
       decision,
@@ -427,6 +460,8 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
         integration_id: request.integrationId,
         tool_key: action.key,
         risk_level: action.risk,
+        action_category: decision.category,
+        risk_tier: decision.tier,
         input_redacted: plainJson(action.redactInput ? action.redactInput(parsed.data) : input) as Json,
         input_sha256: fingerprint,
         pending_input: status === 'skipped' ? null : (input as Json),
@@ -445,12 +480,29 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
       .select('id')
       .single()
     if (executionError?.code === '23505') return await duplicateResult(runtime, request.organizationId, request.idempotencyKey)
+    if (executionError?.code === '55000') {
+      // The emergency stop was switched on between the check above and the insert.
+      if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
+      return refused(new IntegrationError('emergency_stop'))
+    }
     if (executionError?.code === '23514') {
       // The database refuses inputs that look like credentials (private.jsonb_contains_secret).
       if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'cancelled', null)
       return refused(new IntegrationError('invalid_input', { message: 'The input contains something that looks like a password, token or API key, so it wasn’t sent.' }))
     }
     if (executionError || !execution) throw new IntegrationError('unavailable', { message: 'The request couldn’t be recorded.', mayHaveReachedProvider: false })
+
+    const audited = actor.kind !== 'user' || isConsequential(decision.category)
+    if (audited) {
+      await auditAction(runtime, request.organizationId, {
+        action: status === 'skipped' ? 'action.denied' : status === 'awaiting_approval' ? 'action.approval_requested' : 'action.started',
+        executionId: execution.id,
+        toolKey: action.key,
+        employeeId,
+        userId: actor.kind === 'user' ? actor.userId : null,
+        metadata: { category: decision.category, tier: decision.tier, decision: decision.decision, reason: decision.reason, policy_id: decision.policyId, actor: actor.kind },
+      })
+    }
 
     if (status === 'skipped') {
       if (ownsTask) await finishTask(runtime, request.organizationId, task.id, 'skipped', null)
@@ -467,6 +519,7 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
           ...(actor.kind === 'employee' ? { employee_id: actor.employeeId, employee_version_id: actor.employeeVersionId } : {}),
           ...(actor.kind === 'workflow' ? { workflow_run_id: actor.runId, workflow_version_id: actor.workflowVersionId } : {}),
           policy_id: decision.policyId,
+          policy_revision: decision.policyRevision,
           action_summary: summary,
           // Approvers see exactly what will be sent.
           proposed_action: {
@@ -477,7 +530,19 @@ export async function requestAction(runtime: IntegrationRuntime, request: Execut
           } as Json,
           payload_sha256: fingerprint,
           status: 'pending',
-          required_role: approverRoleFor(action.risk),
+          required_role: decision.approverRole,
+          separate_approver: decision.separateApprover,
+          action_category: decision.category,
+          risk_tier: decision.tier,
+          // Checked again before the action runs (see checkApprovalStillHolds).
+          binding: {
+            connectionAccountId: connection!.external_account_id,
+            approverRole: decision.approverRole,
+            separateApprover: decision.separateApprover,
+            ...(actor.kind === 'employee' ? { employeeVersionId: actor.employeeVersionId } : {}),
+            ...(actor.kind === 'workflow' ? { workflowVersionId: actor.workflowVersionId } : {}),
+            policies: decision.policyRevisions,
+          } as Json,
           expires_at: new Date(now.getTime() + decision.approvalHours * 3_600_000).toISOString(),
         })
         .select('id')
@@ -561,6 +626,61 @@ interface ExecutionRow {
   status: string
   input_sha256: string
   pending_input: Json | null
+  policy_decision: string
+  requested_by: string | null
+  action_category: string | null
+  risk_tier: string | null
+}
+
+/**
+ * Whether an approved action may still run: the approval is approved and
+ * unexpired, the connection is still the account it was approved for, the
+ * approver still holds the role the action needs now, and a separate
+ * approver (if now required) isn't the requester.
+ */
+async function checkApprovalStillHolds(
+  runtime: IntegrationRuntime,
+  execution: ExecutionRow,
+  connection: ConnectionRow,
+  decision: ActionDecision,
+): Promise<IntegrationError | null> {
+  const { data: approval, error } = await runtime.admin
+    .from('approval_requests')
+    .select('id, status, decided_by, expires_at, payload_sha256, binding')
+    .eq('tool_execution_id', execution.id)
+    .eq('organization_id', execution.organization_id)
+    .maybeSingle()
+  if (error) throw new IntegrationError('unavailable', { message: 'The approval couldn’t be checked.', mayHaveReachedProvider: false })
+  const invalid = (message: string) => new IntegrationError('approval_invalidated', { message })
+  if (!approval || approval.status !== 'approved' || !approval.decided_by) return invalid('This action has no valid approval.')
+  if (approval.payload_sha256 !== execution.input_sha256) return invalid('The action changed after it was approved.')
+  if (new Date(approval.expires_at) <= runtime.now()) return invalid('The approval expired before the action could run.')
+  const binding = (approval.binding ?? {}) as { connectionAccountId?: string | null }
+  if (binding.connectionAccountId !== undefined && binding.connectionAccountId !== connection.external_account_id) {
+    return invalid('The connection now points to a different account than the one that was approved.')
+  }
+  const { data: approver, error: approverError } = await runtime.admin
+    .from('organization_members')
+    .select('role, status')
+    .eq('organization_id', execution.organization_id)
+    .eq('user_id', approval.decided_by)
+    .maybeSingle()
+  if (approverError) throw new IntegrationError('unavailable', { message: 'The approver couldn’t be checked.', mayHaveReachedProvider: false })
+  if (!approver || approver.status !== 'active' || !roleAtLeast(approver.role as OrganizationRole, decision.approverRole)) {
+    return invalid(`The person who approved this is no longer ${decision.approverRole === 'owner' ? 'an owner' : `an ${decision.approverRole} or above`} here.`)
+  }
+  if (decision.separateApprover && execution.requested_by && approval.decided_by === execution.requested_by) {
+    return invalid('Workspace policy now requires someone other than the requester to approve this action.')
+  }
+  return null
+}
+
+/** Who an execution acts for: an employee, a workflow step, or a person. */
+async function executionActor(runtime: IntegrationRuntime, execution: ExecutionRow): Promise<PolicyActor> {
+  if (execution.employee_id) return 'employee'
+  const { data, error } = await runtime.admin.from('tasks').select('workflow_run_id').eq('id', execution.task_id).eq('organization_id', execution.organization_id).maybeSingle()
+  if (error) throw new IntegrationError('unavailable', { message: 'The execution’s task couldn’t be loaded.', mayHaveReachedProvider: false })
+  return data?.workflow_run_id ? 'workflow' : 'person'
 }
 
 /**
@@ -573,7 +693,7 @@ export async function runExecution(
 ): Promise<ExecuteResult> {
   const { data: row, error } = await runtime.admin
     .from('tool_executions')
-    .select('id, organization_id, task_id, employee_id, integration_id, tool_key, status, input_sha256, pending_input')
+    .select('id, organization_id, task_id, employee_id, integration_id, tool_key, status, input_sha256, pending_input, policy_decision, requested_by, action_category, risk_tier')
     .eq('id', claim.executionId)
     .eq('organization_id', claim.organizationId)
     .maybeSingle()
@@ -604,8 +724,27 @@ export async function runExecution(
     connection = await loadConnection(runtime, execution.organization_id, execution.integration_id)
     const problem = checkConnection(connection, connector, action)
     if (problem) return fail(problem)
-    const decision = await decide(runtime, execution.organization_id, execution.integration_id, action, execution.employee_id)
+    const actor = await executionActor(runtime, execution)
+    if (actor !== 'person') {
+      const stopped = await emergencyStopError(runtime, execution.organization_id)
+      if (stopped) return fail(stopped)
+    }
+    const decision = await decide(runtime, execution.organization_id, execution.integration_id, action, actor, execution.employee_id)
     if (decision.decision === 'deny') return fail(new IntegrationError(decision.policyId ? 'denied_by_policy' : 'action_disabled', { message: decision.reason }))
+    if (execution.policy_decision === 'require_approval') {
+      const invalid = await checkApprovalStillHolds(runtime, execution, connection!, decision)
+      if (invalid) {
+        await auditAction(runtime, execution.organization_id, {
+          action: 'approval.invalidated',
+          executionId: execution.id,
+          toolKey: execution.tool_key,
+          employeeId: execution.employee_id,
+          userId: null,
+          metadata: { reason: invalid.message },
+        })
+        return fail(invalid)
+      }
+    }
     if (execution.employee_id) {
       // An approval doesn't outlive the employee's pause or a narrowed grant.
       const [grant, employee] = await Promise.all([
@@ -700,6 +839,20 @@ async function renewLease(runtime: IntegrationRuntime, execution: ExecutionRow) 
     .eq('status', 'executing')
 }
 
+/** Outcomes of consequential actions and of every employee action are audited. */
+async function auditOutcome(runtime: IntegrationRuntime, execution: ExecutionRow, action: string, metadata: Record<string, unknown>) {
+  const consequential = execution.risk_tier !== null && execution.risk_tier !== 'low'
+  if (!consequential && !execution.employee_id) return
+  await auditAction(runtime, execution.organization_id, {
+    action,
+    executionId: execution.id,
+    toolKey: execution.tool_key,
+    employeeId: execution.employee_id,
+    userId: execution.employee_id ? null : execution.requested_by,
+    metadata: { category: execution.action_category, tier: execution.risk_tier, ...metadata },
+  })
+}
+
 async function finishExecution(
   runtime: IntegrationRuntime,
   execution: ExecutionRow,
@@ -717,6 +870,7 @@ async function finishExecution(
       .eq('status', 'executing')
     if (!execution.employee_id) await finishTask(runtime, execution.organization_id, execution.task_id, 'failed', { error })
     await recordEvent(runtime, execution.organization_id, execution.id, 'tool.failed', 'error', error.message, { code: error.code })
+    await auditOutcome(runtime, execution, 'action.failed', { code: error.code })
     return { status: 'failed', executionId: execution.id, error }
   }
 
@@ -734,6 +888,7 @@ async function finishExecution(
   }
   if (!execution.employee_id) await finishTask(runtime, execution.organization_id, execution.task_id, 'succeeded', { result: { action: execution.tool_key, output: stored } })
   await recordEvent(runtime, execution.organization_id, execution.id, 'tool.succeeded', 'info', 'Action completed.')
+  await auditOutcome(runtime, execution, 'action.succeeded', {})
   return { status: 'succeeded', executionId: execution.id, output: outcome.output }
 }
 
