@@ -301,9 +301,11 @@ select is(
   'an update that marks a lead qualified is a qualified lead, not a created contact'
 );
 
--- Retention clears payloads, never outcomes.
+-- Retention clears payloads, never outcomes (the guard only allows it while the purge runs).
+select set_config('nexefiy.retention_purge', 'on', true);
 update public.tool_executions set input_redacted = '{}', output_redacted = null, payload_purged_at = now()
 where id = 'a8000000-0000-4000-8000-0000000000e1';
+select set_config('nexefiy.retention_purge', 'off', true);
 select is(
   (select count(*)::int from public.outcome_records where tool_execution_id = 'a8000000-0000-4000-8000-0000000000e1'),
   2, 'outcomes survive the purge of the action’s payload'
