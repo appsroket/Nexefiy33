@@ -2,6 +2,25 @@
 
 Honest list of what does not exist or is unverified. Update every phase.
 
+## As of Phase 13 (2026-10-19)
+
+### Implemented and verified
+- **Templates for every category** (ADR-028): Sales Operations, Customer Support, Marketing, Analytics, Operations Coordinator, Team Updates, Executive Assistant, Finance Administration, HR Administration, Research Analyst, Knowledge Assistant, Voice Receptionist, Custom. Each declares purpose, required integrations, skills, permissions, success criteria, risk, approvals and limitations; availability is computed from what is built. Ten categories can be configured on the shared runtime; nine of those are only partly available and list what they can't do.
+- **Skills:** 44 built-in procedures, 30 available (seeded by migration `employee_skills_catalog`, selectable in the editor, added to the system prompt); planned ones exist only to explain limitations. Fingerprinted so shipped procedures can't change silently; built-in keys reserved.
+- **Tests:** `tests/employees/templates.test.ts` (capabilities tied to the tool catalog, skill/migration agreement, fingerprints, prompt, validation warnings, model-proposed skills, every template's declarations, availability, drafts valid on the shared schema, no advertised unbuilt integration, finance/HR strictness); pgTAP 012 (seeded catalog, retired skills, reserved keys); pgTAP 001–012 pass locally.
+
+### Not verified yet
+- **No employee built from any template has run against a live model or a live HubSpot/Slack account.** "Ready to configure" means the capabilities exist and are tested in code, not that the template has done real work.
+- **Migration `employee_skills_catalog` is not applied to the dev project** (nor the five before it).
+- **Voice is designed, not built** (docs/voice-employees.md): Twilio Programmable Voice + ConversationRelay was selected from vendor documentation read through search excerpts; no account, number or call exists, and nothing about it has been verified by a call. The voice template can't be used.
+- No signed-in browser check of the new template gallery.
+
+### Limitations
+- Most category duties beyond knowledge, HubSpot contacts/notes and Slack posting need integrations that don't exist: web research, email, calendars, help desks, publishing, analytics data sources, accounting, HR systems, telephony.
+- Analytics, finance and marketing analysis work only on data given in the request or uploaded to Knowledge.
+- Skills are prompt procedures: they shape how an employee works but are not separately enforced; tools, approvals and limits remain the enforcement.
+- Workspaces can create their own skills in the database, but there is no UI for it and their instructions aren't added to the prompt yet (only built-in procedures are).
+
 ## As of Phase 12 (2026-10-19)
 
 ### Implemented and verified

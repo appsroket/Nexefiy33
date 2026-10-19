@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/page-header'
 import { hasMinRole } from '@/lib/supabase/types'
 import { getShellContext } from '@/modules/app-shell/server/shell-context'
 import { requireWorkspace } from '@/modules/app-shell/ui/workspace-gate'
-import { EMPLOYEE_TEMPLATES, templateCapabilities } from '@/modules/employees/domain/templates'
+import { templateCards } from '@/modules/employees/domain/templates'
 import { loadEditorOptions } from '@/modules/employees/server/queries'
 import { listEmployeeTools } from '@/modules/employees/server/tools'
 import { NewEmployee } from '@/modules/employees/ui/new-employee'
@@ -50,14 +50,8 @@ export default async function NewEmployeePage() {
 
   const tools = listEmployeeTools()
   const options = await loadEditorOptions(workspace.organizationId)
-  const templates = EMPLOYEE_TEMPLATES.map((template) => ({
-    key: template.key,
-    name: template.name,
-    department: template.department,
-    summary: template.summary,
-    capabilities: templateCapabilities(template, tools),
-    limitations: template.limitations,
-  }))
+  const templates = templateCards(tools, options.connections)
+
 
   return (
     <>

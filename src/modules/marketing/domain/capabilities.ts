@@ -70,7 +70,7 @@ export const CAPABILITIES: Record<CapabilityArea, readonly Capability[]> = {
       id: 'employee-templates',
       title: 'AI employees from a description or a template',
       description:
-        'Describe the employee in your own words or start from a template, review every setting, test it, then activate it once its tests pass.',
+        'Describe the employee in your own words or start from a template for sales, support, marketing, analytics, operations, executive assistance, finance or HR administration, or research. Each template says what it can’t do yet. Review every setting, test it, then activate it once its tests pass.',
       status: 'first_release',
     },
     {
@@ -82,8 +82,8 @@ export const CAPABILITIES: Record<CapabilityArea, readonly Capability[]> = {
     },
     {
       id: 'more-templates',
-      title: 'More roles, including voice',
-      description: 'Marketing, analytics, operations, finance admin, HR admin, research and voice employees.',
+      title: 'Voice employees',
+      description: 'AI employees that answer phone calls, say they are an AI, collect details and transfer callers to a person. Telephony is not built yet.',
       status: 'later',
     },
   ],

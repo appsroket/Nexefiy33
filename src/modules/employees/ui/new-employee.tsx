@@ -9,27 +9,20 @@ import { useActionState, useState } from 'react'
 
 import { SectionCard } from '@/components/cards'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 
-import { DEPARTMENT_LABELS, type ConnectionOption, type Department, type EmployeeToolInfo, type KnowledgeSourceOption, type SkillOption } from '../domain/types'
+import type { TemplateCard } from '../domain/templates'
+import type { ConnectionOption, EmployeeToolInfo, KnowledgeSourceOption, SkillOption } from '../domain/types'
 import { draftEmployeeAction, type DraftState } from '../server/actions'
 import { EmployeeEditor } from './employee-editor'
+import { TemplateGallery } from './template-gallery'
 
 const IDLE: DraftState = { status: 'idle' }
 
-export interface TemplateCard {
-  key: string
-  name: string
-  department: Department
-  summary: string
-  capabilities: string[]
-  limitations: string[]
-}
 
 const EXAMPLE =
   'Create a sales operations employee that researches leads, checks for CRM duplicates, prepares follow-up messages, and requests approval before sending.'
@@ -108,52 +101,7 @@ export function NewEmployee({
         </TabsContent>
 
         <TabsContent value="template">
-          <div className="grid gap-4 md:grid-cols-2">
-            {templates.map((template) => (
-              <SectionCard
-                key={template.key}
-                title={template.name}
-                description={
-                  <>
-                    <Badge variant="outline" className="mb-2">
-                      {DEPARTMENT_LABELS[template.department]}
-                    </Badge>
-                    <span className="block">{template.summary}</span>
-                  </>
-                }
-                footer={
-                  <form action={formAction}>
-                    <input type="hidden" name="organizationId" value={organizationId} />
-                    <input type="hidden" name="templateKey" value={template.key} />
-                    <Button type="submit" variant="outline" disabled={pending}>
-                      Use this template
-                    </Button>
-                  </form>
-                }
-              >
-                {template.capabilities.length ? (
-                  <div className="text-sm">
-                    <p className="font-medium">Can</p>
-                    <ul className="list-disc pl-5 text-muted-foreground">
-                      {template.capabilities.map((capability) => (
-                        <li key={capability}>{capability}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {template.limitations.length ? (
-                  <div className="mt-2 text-sm">
-                    <p className="font-medium">Can’t yet</p>
-                    <ul className="list-disc pl-5 text-muted-foreground">
-                      {template.limitations.map((limitation) => (
-                        <li key={limitation}>{limitation}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </SectionCard>
-            ))}
-          </div>
+          <TemplateGallery templates={templates} pending={pending} action={formAction} organizationId={organizationId} />
         </TabsContent>
       </Tabs>
 

@@ -1,5 +1,5 @@
-// Pure rules of the employee builder: the configuration schema, templates
-// that only use real tools, the keyword drafter, semantic validation, the
+// Pure rules of the employee builder: the configuration schema (templates and
+// skills are in templates.test.ts), the keyword drafter, semantic validation, the
 // lifecycle buttons (mirroring change_employee_status), automatic test checks,
 // the system prompt, and model cost accounting.
 
@@ -9,7 +9,8 @@ import { availableActions, activationHint } from '@/modules/employees/domain/lif
 import { buildSystemPrompt } from '@/modules/employees/domain/prompt'
 import { draftFromDescription, parseDescription } from '@/modules/employees/domain/rule-drafter'
 import { employeeConfigSchema, employeeDraftSchema } from '@/modules/employees/domain/schemas'
-import { buildTemplateDraft, EMPLOYEE_TEMPLATES, templateCapabilities } from '@/modules/employees/domain/templates'
+import { availableSkills } from '@/modules/employees/domain/skills'
+import { buildTemplateDraft, EMPLOYEE_TEMPLATES } from '@/modules/employees/domain/templates'
 import { evaluateChecks, runResult } from '@/modules/employees/domain/test-checks'
 import type { EmployeeConfig, LifecycleState, TestStatus } from '@/modules/employees/domain/types'
 import { activationBlockers, validateConfig } from '@/modules/employees/domain/validation'
@@ -27,11 +28,7 @@ const CONTEXT = {
     { id: SLACK, provider: 'slack', label: 'Test workspace', status: 'connected' },
   ],
   sources: [{ id: OTHER, name: 'Handbook', status: 'ready' }],
-  skills: [
-    { key: 'crm.records', name: 'CRM', description: null, toolKeys: [] },
-    { key: 'chat.messaging', name: 'Chat', description: null, toolKeys: [] },
-    { key: 'knowledge.search', name: 'Knowledge', description: null, toolKeys: [] },
-  ],
+  skills: availableSkills().map((skill) => ({ key: skill.key, name: skill.name, description: skill.description, toolKeys: skill.toolKeys })),
 }
 const connectionFor = (provider: string) => (provider === 'hubspot' ? HUBSPOT : provider === 'slack' ? SLACK : null)
 
@@ -46,32 +43,6 @@ describe('tool catalog', () => {
     )
     expect(TOOLS.find((tool) => tool.key === 'knowledge.search')).toMatchObject({ needsConnection: false, risk: 'read' })
     expect(TOOLS.find((tool) => tool.key === 'slack.messages.post')).toMatchObject({ needsConnection: true, risk: 'write_external', approvalRequirement: 'default_required' })
-  })
-})
-
-describe('templates', () => {
-  it('only use tools and skills that exist, and advertise capabilities derived from those tools', () => {
-    const keys = new Set(TOOLS.map((tool) => tool.key))
-    for (const template of EMPLOYEE_TEMPLATES) {
-      for (const key of template.toolKeys) expect(keys.has(key), `${template.key}: ${key}`).toBe(true)
-      for (const skill of template.skills) expect(['crm.records', 'chat.messaging', 'knowledge.search']).toContain(skill)
-      expect(templateCapabilities(template, TOOLS)).toHaveLength(template.toolKeys.length)
-    }
-    // No template mentions an integration Nexefiy doesn't have as something it can do.
-    const advertised = EMPLOYEE_TEMPLATES.flatMap((template) => [template.summary, ...templateCapabilities(template, TOOLS)]).join(' ')
-    expect(advertised).not.toMatch(/gmail|calendar|outlook|whatsapp|sms/i)
-  })
-
-  it('produce drafts that pass the schema and semantic validation, with approval on every write', () => {
-    for (const template of EMPLOYEE_TEMPLATES) {
-      const draft = buildTemplateDraft(template, TOOLS, connectionFor)
-      expect(employeeDraftSchema.safeParse(draft).success, template.key).toBe(true)
-      expect(validateConfig(draft.config, CONTEXT).errors, template.key).toEqual([])
-      for (const grant of draft.config.tools) {
-        const tool = TOOLS.find((candidate) => candidate.key === grant.toolKey)!
-        expect(grant.approval, grant.toolKey).toBe(tool.risk === 'read' ? 'allow' : 'require_approval')
-      }
-    }
   })
 })
 

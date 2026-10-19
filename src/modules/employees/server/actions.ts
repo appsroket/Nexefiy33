@@ -30,7 +30,7 @@ import { getModelGateway, isModelConfigured } from '@/modules/models/server/prov
 
 import { ACTION_MIN_ROLE, LIFECYCLE_ACTIONS, type LifecycleAction } from '../domain/lifecycle'
 import { employeeConfigSchema, employeeDraftSchema, issuesOf, testCaseSchema } from '../domain/schemas'
-import { buildTemplateDraft, getTemplate } from '../domain/templates'
+import { buildTemplateDraft, getTemplate, templateAvailability, templateLimitations } from '../domain/templates'
 import type { CheckResult } from '../domain/test-checks'
 import type { EmployeeDraft, RunOutcome, TestRunResult } from '../domain/types'
 import { activationBlockers, validateConfig, type ConfigIssue } from '../domain/validation'
@@ -98,12 +98,13 @@ export async function draftEmployeeAction(_previous: DraftState, formData: FormD
   if (typeof templateKey === 'string' && templateKey) {
     const template = getTemplate(templateKey)
     if (!template) return { status: 'error', message: 'That template doesn’t exist.' }
+    if (templateAvailability(template) === 'planned') return { status: 'error', message: `The “${template.name}” template needs integrations that aren’t built yet, so it can’t be used.` }
     return {
       status: 'ready',
       draft: buildTemplateDraft(template, catalog, connectionFor),
       source: 'template',
       notes: [`Started from the “${template.name}” template. Review every field.`],
-      unsupported: template.limitations,
+      unsupported: templateLimitations(template),
       nonce,
     }
   }

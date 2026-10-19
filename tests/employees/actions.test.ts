@@ -43,11 +43,7 @@ vi.mock('@/modules/employees/server/queries', () => ({
       { id: SLACK, provider: 'slack', label: 'Test workspace', status: 'connected' },
     ],
     sources: [],
-    skills: [
-      { key: 'crm.records', name: 'CRM', description: null, toolKeys: [] },
-      { key: 'chat.messaging', name: 'Chat', description: null, toolKeys: [] },
-      { key: 'knowledge.search', name: 'Knowledge', description: null, toolKeys: [] },
-    ],
+    skills: (await import('@/modules/employees/domain/skills')).availableSkills().map((skill) => ({ key: skill.key, name: skill.name, description: skill.description, toolKeys: skill.toolKeys })),
   }),
 }))
 vi.mock('@/modules/models/server/provider', () => ({
@@ -109,6 +105,7 @@ describe('drafting', () => {
         responsibilities: ['Check for duplicates'],
         instructions: 'You keep the CRM clean.',
         toolKeys: ['hubspot.contacts.search', 'gmail.send'],
+        skillKeys: ['crm.records'],
         successCriteria: ['No duplicates'],
         prohibitedActions: [],
         escalationWhen: [],
@@ -131,7 +128,12 @@ describe('drafting', () => {
 
   it('starts from a template', async () => {
     const state = await actions.draftEmployeeAction({ status: 'idle' }, form({ organizationId: ORG, templateKey: 'sales_operations' }))
-    expect(state).toMatchObject({ status: 'ready', source: 'template', unsupported: [expect.stringContaining('email')] })
+    expect(state).toMatchObject({ status: 'ready', source: 'template', unsupported: expect.arrayContaining([expect.stringContaining('Email')]) })
+  })
+
+  it('refuses a template whose integrations aren’t built', async () => {
+    const state = await actions.draftEmployeeAction({ status: 'idle' }, form({ organizationId: ORG, templateKey: 'voice_receptionist' }))
+    expect(state).toMatchObject({ status: 'error', message: expect.stringContaining('aren’t built yet') })
   })
 })
 

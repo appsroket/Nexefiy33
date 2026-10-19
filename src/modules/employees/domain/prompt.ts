@@ -1,10 +1,12 @@
 // The system prompt every employee runs with. The platform rules come first
-// and can't be edited; the employee's configuration follows; organization
-// context comes last, labelled. Knowledge passages and tool results never go
+// and can't be edited; the employee's configuration follows, with the
+// procedures of its skills (skills.ts); organization context comes last,
+// labelled. Knowledge passages and tool results never go
 // here: they arrive as tool results, framed as data.
 
 import { UNTRUSTED_RESULTS_RULE } from '@/modules/tasks/domain/untrusted'
 
+import { getSkill, isSkillAvailable, type SkillDefinition } from './skills'
 import { DEPARTMENT_LABELS, ESCALATION_BEHAVIOR_LABELS, type EmployeeConfig, type EmployeeToolInfo } from './types'
 
 export const ESCALATE_TOOL_NAME = 'escalate'
@@ -26,6 +28,7 @@ function bullets(items: readonly string[]): string {
 }
 
 export function buildSystemPrompt({ employeeName, organizationName, instructions, config, tools, mode, businessContext }: PromptInput): string {
+  const skills = config.skills.map(getSkill).filter((skill): skill is SkillDefinition => skill !== undefined && isSkillAvailable(skill))
   const toolLines = tools.map((tool) => `- ${tool.title}${tool.risk === 'read' ? '' : ' (changes data or sends something; may need approval)'}`)
   const sections = [
     `You are “${employeeName}”, an AI employee${organizationName ? ` of ${organizationName}` : ''}. You work inside Nexefiy.`,
@@ -45,6 +48,9 @@ export function buildSystemPrompt({ employeeName, organizationName, instructions
     `## Your role\nDepartment: ${DEPARTMENT_LABELS[config.profile.department]}${config.profile.description ? `\n${config.profile.description}` : ''}`,
     `## Responsibilities\n${bullets(config.responsibilities)}`,
     `## Instructions\n${instructions}`,
+    ...(skills.length
+      ? [`## Skills (how you do this kind of work)\n${skills.map((skill) => `### ${skill.name}\n${bullets(skill.procedure)}`).join('\n\n')}`]
+      : []),
     `## What a good result looks like\n${bullets(config.successCriteria)}`,
     `## Tools you have\n${toolLines.length ? toolLines.join('\n') : '- (none: answer from the request only)'}`,
     `## You may\n${bullets(config.allowedActions)}`,

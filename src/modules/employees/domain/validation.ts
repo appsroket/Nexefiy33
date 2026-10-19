@@ -4,6 +4,7 @@
 // Run on the server before every save (and again before activation), after
 // the Zod schema has accepted the shape.
 
+import { getSkill } from './skills'
 import type { ConnectionOption, EmployeeConfig, EmployeeToolInfo, KnowledgeSourceOption, SkillOption } from './types'
 
 export interface ConfigIssue {
@@ -55,7 +56,16 @@ export function validateConfig(config: EmployeeConfig, context: ValidationContex
   })
 
   config.skills.forEach((key, index) => {
-    if (!context.skills.some((skill) => skill.key === key)) errors.push({ path: `skills.${index}`, message: `The skill “${key}” isn’t available.` })
+    if (!context.skills.some((skill) => skill.key === key)) {
+      errors.push({ path: `skills.${index}`, message: `The skill “${key}” isn’t available.` })
+      return
+    }
+    // A skill never grants tools: point out the ones its procedure uses that aren't granted.
+    const missing = (getSkill(key)?.toolKeys ?? []).filter((toolKey) => !config.tools.some((grant) => grant.toolKey === toolKey))
+    if (missing.length) {
+      const titles = missing.map((toolKey) => context.tools.find((tool) => tool.key === toolKey)?.title ?? toolKey)
+      warnings.push({ path: `skills.${index}`, message: `The skill “${getSkill(key)!.name}” uses ${titles.join(', ')}, which ${missing.length === 1 ? 'isn’t' : 'aren’t'} granted.` })
+    }
   })
 
   if (config.knowledge.access === 'selected') {

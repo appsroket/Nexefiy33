@@ -102,7 +102,31 @@ Each run is recorded in `employee_test_runs` (transcript with every tool call an
 
 - **With a model configured**, the description goes to Claude Opus 5.5 (the `deep` tier) as a structured-output request (`output_config.format`, validated with Zod), with the tool catalog in the prompt. The proposal is then normalized: tools that don't exist are removed and listed, writes require approval, a connection is filled in only when exactly one connected account exists for the provider, limits and budget come from conservative defaults.
 - **Without a model**, keyword rules (`domain/rule-drafter.ts`) build the draft and say so. Requests no tool can serve (web research, email, calendars, phone, accounting, other apps) are listed as "not possible with the tools that exist today", in both paths.
-- **Templates** (`domain/templates.ts`): Sales Operations Assistant, Support Answer Assistant, Team Updates Coordinator, Knowledge Assistant, Custom. Each lists what it can do (generated from its tools) and what it can't yet; a test checks every template uses only real tools and skills.
+- **Templates** (`domain/templates.ts`, Phase 13, ADR-028): one or more per category — see §7.1. Each is a pre-filled draft on the shared configuration; nothing about it is a separate code path.
+
+### 7.1 Templates and skills (Phase 13)
+
+**Capabilities** (`domain/capabilities.ts`) list what an employee can rely on and whether it is built, with how it was tested: knowledge, HubSpot and Slack (contract-tested only), workflows — built; web research, email, calendar, help desk, publishing, analytics data sources, accounting, HR system, telephony — planned. A test ties `built` to the tool catalog.
+
+**Skills** (`domain/skills.ts`) are reusable working procedures: a name, a category, the steps, the tools they use and the capabilities they need. The runtime adds the procedures of an employee's skills to its system prompt (`## Skills`, after the instructions); a skill never grants a tool (validation warns when a skill's tools aren't granted). 44 skills are defined; the 30 whose capabilities are built are seeded into `public.skills` by migration `employee_skills_catalog` and selectable; the rest (lead research on the web, outreach email, ticketing, publishing, data source queries, calendar coordination, accounting records, HR system records, web sources and the five voice skills) exist only so templates can say what they can't do yet. Shipped procedures never change — a test pins a fingerprint of each — because saved versions refer to skills by key; built-in keys are reserved (a workspace's own skill can't reuse one). The model drafter may choose skills; the proposal keeps only available skills whose tools it grants.
+
+**Templates** declare purpose, required integrations, skills, permissions (tools; writes start with approval required), success criteria, risk (low/medium/high with a reason, never below what its tools imply), approvals and limitations. Availability is computed:
+
+| Category | Template | Availability | Can't yet (planned skills / limits) |
+|---|---|---|---|
+| Sales | Sales Operations Assistant | Partly available | Web lead research, outreach email |
+| Customer support | Customer Support Assistant (`support_answers`) | Partly available | Help desk tickets; replying by email/chat |
+| Marketing | Marketing Assistant | Partly available | Publishing; analytics data sources |
+| Analytics | Analytics Assistant | Partly available | Querying data sources (works on data in the request or knowledge base) |
+| Operations | Operations Coordinator, Team Updates Coordinator | Ready to configure | Systems other than HubSpot/Slack |
+| Executive assistance | Executive Assistant | Partly available | Calendar coordination |
+| Finance administration | Finance Administration Assistant (high risk, lower cost cap, never issues/pays/records) | Partly available | Accounting system records |
+| HR administration | HR Administration Assistant (high risk, sensitive topics to HR) | Partly available | HR system records |
+| Research | Research Analyst, Knowledge Assistant | Partly available / ready | Web sources |
+| Voice | Voice Receptionist | **Not available yet** (needs telephony; can't be used) | Everything — design in docs/voice-employees.md |
+| Other | Custom employee | Ready to configure | Only the tools that exist |
+
+"Ready to configure" means the capabilities exist and are covered by automated tests — not that an employee from it has done real work: each employee still has to pass its own tests before activation, and no employee has completed a task against a live model or account yet. The gallery shows each template's declarations, whether this workspace has the required connections, and disables templates that aren't available; the server refuses them too. `tests/employees/templates.test.ts` checks every rule above.
 
 ## 8. Model gateway
 

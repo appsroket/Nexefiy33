@@ -74,7 +74,7 @@ export const EMPLOYEE_CATEGORIES: readonly EmployeeCategory[] = [
       'Turn a blog post into short social posts',
       'Keep a content calendar up to date',
     ],
-    tools: ['To be decided'],
+    tools: ['Business knowledge', 'Slack'],
     approvals: 'Anything published or sent outside your business.',
   },
   {
@@ -88,8 +88,8 @@ export const EMPLOYEE_CATEGORIES: readonly EmployeeCategory[] = [
       'Remind owners about overdue tasks',
       'Check that a checklist was completed before a deadline',
     ],
-    tools: ['To be decided'],
-    approvals: 'To be defined with the template.',
+    tools: ['HubSpot', 'Slack', 'Business knowledge'],
+    approvals: 'Changing CRM records and posting to Slack.',
   },
   {
     id: 'analytics',
@@ -102,8 +102,8 @@ export const EMPLOYEE_CATEGORIES: readonly EmployeeCategory[] = [
       'Explain what changed in a report since last month',
       'Answer a question about your pipeline in plain words',
     ],
-    tools: ['To be decided'],
-    approvals: 'To be defined with the template.',
+    tools: ['Business knowledge', 'Slack'],
+    approvals: 'Posting alerts to Slack. It analyzes only the data you give it.',
   },
   {
     id: 'voice',
@@ -116,8 +116,8 @@ export const EMPLOYEE_CATEGORIES: readonly EmployeeCategory[] = [
       'Take a message and create a follow-up task',
       'Hand a call to a person when it needs one',
     ],
-    tools: ['A telephony provider (not chosen yet)'],
-    approvals: 'To be defined with the template.',
+    tools: ['Twilio telephony (selected, not built yet)'],
+    approvals: 'Recording only with the caller’s consent; anything that changes data becomes a follow-up task that needs approval.',
   },
   {
     id: 'custom',

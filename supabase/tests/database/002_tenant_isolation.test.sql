@@ -141,7 +141,7 @@ select is_empty(
   $$ select id from public.profiles where id <> 'c0000000-0000-4000-8000-000000000001' $$,
   'an outsider sees no other profiles'
 );
-select is((select count(*)::int from public.skills), 5, 'an outsider sees only the built-in skills');
+select is_empty('select id from public.skills where organization_id is not null', 'an outsider sees only the built-in skills');
 select throws_ok(
   $$ insert into public.ai_employees (organization_id, name, role_category)
      values ('a1000000-0000-4000-8000-000000000000', 'Intruder', 'custom') $$,
